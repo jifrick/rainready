@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from models import MODEL_IDS
 
-# Load GEMINI_API_KEY from local .env at startup
+# Load GEMINI_API_KEY and GOOGLE_WEATHER_API_KEY from local .env at startup
 load_dotenv()
 
 logging.basicConfig(
@@ -36,7 +36,7 @@ beta_client: Optional[genai.Client] = None
 
 def _init_genai_clients() -> tuple[genai.Client, genai.Client]:
     global client, beta_client
-    load_dotenv()
+    load_dotenv(override=True)
     if not os.environ.get("GEMINI_API_KEY", "").strip():
         raise HTTPException(
             status_code=503,
@@ -56,11 +56,12 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 CLOUD_RUN_PROJECT = "geminisprints26blr-3834"
+GOOGLE_WEATHER_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Flood Actionable Reasoning Engine for Kochi, Kerala.
-Given live Open-Meteo rainfall telemetry, neighborhood elevation and drainage metadata, timestamped resident reports, and calibrated probabilities/scores from Gemini Decision 1:
-1. List exact observable signal drivers in `visible_signals` (citing exact rainfall rate in mm/hr, zone elevation/drainage metadata, resident reports, and calibrated Decision 1 signals).
+Given live weather telemetry (Google Weather API / Open-Meteo), 24-hour antecedent rainfall, thunderstorm probability, neighborhood elevation and drainage metadata, timestamped resident reports, and calibrated probabilities/scores from Gemini Decision 1:
+1. List exact observable signal drivers in `visible_signals` (citing exact rainfall rate in mm/hr, antecedent 24h rain / thunderstorm risk when present, zone elevation/drainage metadata, resident reports, and calibrated Decision 1 signals).
 2. Write a concise operational verification note in `responder_summary` for municipal emergency management human reviewers.
 3. Provide 2 to 3 clear, practical next steps in `resident_actions` tailored to residents and commuters in this Kochi zone (e.g., moving parked vehicles, avoiding sub-grade underpasses, clearing storm grates, or normal transit readiness).
 """
@@ -326,22 +327,61 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _http_get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
+    if _http_client is not None:
+        resp = await _http_client.get(url, params=params)
+        resp.raise_for_status()
+        return resp.json()
+    async with httpx.AsyncClient(timeout=10.0) as fallback_client:
+        resp = await fallback_client.get(url, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _fetch_google_weather(lat: float, lng: float, weather_key: str) -> dict[str, Any]:
+    """Fetch hyperlocal live conditions from Google Maps Platform Weather API (`v1/currentConditions:lookup`)."""
+    params = {
+        "key": weather_key,
+        "location.latitude": lat,
+        "location.longitude": lng,
+    }
+    payload = await _http_get_json(GOOGLE_WEATHER_URL, params)
+
+    precip = payload.get("precipitation", {}) or {}
+    qpf_mm = float((precip.get("qpf") or {}).get("quantity", 0.0) or 0.0)
+    rain_prob_pct = int((precip.get("probability") or {}).get("percent", 0) or 0)
+    history = payload.get("currentConditionsHistory", {}) or {}
+    past_24h_qpf_mm = float((history.get("qpf") or {}).get("quantity", 0.0) or 0.0)
+    condition_desc = ((payload.get("weatherCondition") or {}).get("description") or {}).get(
+        "text", "Current conditions"
+    )
+    thunderstorm_prob_pct = int(payload.get("thunderstormProbability", 0) or 0)
+    humidity_pct = int(payload.get("relativeHumidity", 0) or 0)
+    temp_c = float((payload.get("temperature") or {}).get("degrees", 0.0) or 0.0)
+
+    return {
+        "observed_precipitation_mm": round(qpf_mm, 2),
+        "observed_rain_mm": round(qpf_mm, 2),
+        "past_24h_rain_mm": round(past_24h_qpf_mm, 2),
+        "rain_probability_pct": rain_prob_pct,
+        "thunderstorm_probability_pct": thunderstorm_prob_pct,
+        "relative_humidity_pct": humidity_pct,
+        "condition_text": condition_desc,
+        "temperature_c": round(temp_c, 1),
+        "unit": "mm",
+        "observation_time": payload.get("currentTime"),
+        "source": "Google Maps Platform Weather API",
+    }
+
+
 async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
-    """Fetch live precipitation (current=precipitation,rain) from Open-Meteo."""
+    """Fallback live precipitation (current=precipitation,rain) from Open-Meteo."""
     params = {
         "latitude": lat,
         "longitude": lng,
         "current": "precipitation,rain",
     }
-    if _http_client is not None:
-        resp = await _http_client.get(OPEN_METEO_URL, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
-    else:
-        async with httpx.AsyncClient(timeout=10.0) as fallback_client:
-            resp = await fallback_client.get(OPEN_METEO_URL, params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+    payload = await _http_get_json(OPEN_METEO_URL, params)
 
     current = payload.get("current", {})
     units = payload.get("current_units", {})
@@ -352,6 +392,18 @@ async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
         "observation_time": current.get("time"),
         "source": "Open-Meteo Live API",
     }
+
+
+async def _fetch_live_weather(lat: float, lng: float) -> dict[str, Any]:
+    """Use Google Weather API when GOOGLE_WEATHER_API_KEY is present; fall back to Open-Meteo."""
+    load_dotenv(override=True)
+    weather_key = os.environ.get("GOOGLE_WEATHER_API_KEY", "").strip()
+    if weather_key:
+        try:
+            return await _fetch_google_weather(lat, lng, weather_key)
+        except httpx.HTTPError as exc:
+            logger.warning("Google Weather API error (%s); falling back to Open-Meteo.", exc)
+    return await _fetch_open_meteo(lat, lng)
 
 
 def _build_zone_input(
@@ -370,14 +422,24 @@ def _build_zone_input(
     else:
         formatted_reports = "  - None reported in this zone yet."
 
+    extra_meteo = ""
+    if "past_24h_rain_mm" in weather:
+        extra_meteo = (
+            f"\nSky Condition: {weather.get('condition_text', 'N/A')} | "
+            f"Rain Probability: {weather.get('rain_probability_pct', 0)}% | "
+            f"Thunderstorm Probability: {weather.get('thunderstorm_probability_pct', 0)}% | "
+            f"24-Hour Antecedent Rainfall Accumulation: {weather.get('past_24h_rain_mm', 0.0):.2f} mm | "
+            f"Humidity: {weather.get('relative_humidity_pct', 0)}%"
+        )
+
     rain_mode = (
         f"ACTIVE CLOUDBURST OVERRIDE: {simulated_rain_mm:.1f} mm/hr simulated rainfall "
-        f"(Live Open-Meteo baseline: {weather['observed_precipitation_mm']:.1f} mm). "
-        f"Evaluate {simulated_rain_mm:.1f} mm/hr as the current live rainfall intensity."
+        f"(Live {weather['source']} baseline: {weather['observed_precipitation_mm']:.2f} mm). "
+        f"Evaluate {simulated_rain_mm:.1f} mm/hr as the current live rainfall intensity.{extra_meteo}"
         if simulated_rain_mm is not None
         else (
-            f"LIVE OPEN-METEO TELEMETRY: precipitation={weather['observed_precipitation_mm']:.1f} mm, "
-            f"rain={weather['observed_rain_mm']:.1f} mm (observed at {weather.get('observation_time', 'now')})."
+            f"LIVE {weather['source'].upper()} TELEMETRY: current precipitation={weather['observed_precipitation_mm']:.2f} mm "
+            f"(observed at {weather.get('observation_time', 'now')}).{extra_meteo}"
         )
     )
 
@@ -392,7 +454,7 @@ Terrain & Drainage Metadata: {meta['drainage_profile']}
 
 WEATHER SIGNAL:
 {rain_mode}
-Effective Rainfall Rate: {weather['effective_rain_mm']:.1f} mm/hr
+Effective Rainfall Rate: {weather['effective_rain_mm']:.2f} mm/hr
 
 RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
 {formatted_reports}"""
@@ -414,11 +476,7 @@ async def _run_stage1_decision_gate(
     v1beta_client: genai.Client,
     shared_input: str,
 ) -> dict[str, Any]:
-    """Stage 1 — Fast Calibration Gate (`gemini-decision-1` on `beta_client.decisions.create`).
-
-    Evaluates `escalate_alert` (noul), `risk_level` (choice with `other` catch-all),
-    and `severity_score` (3-level ordered score rubric) in one forward pass (0 output tokens).
-    """
+    """Stage 1 — Fast Calibration Gate (`gemini-decision-1` on `beta_client.decisions.create`)."""
     decision = await asyncio.to_thread(
         v1beta_client.decisions.create,
         model=MODEL_IDS["decisions"],
@@ -483,8 +541,6 @@ async def _run_stage1_decision_gate(
         "other": "WATCH" if escalate_prob >= 0.50 else "LOW",
     }
     mapped_risk_level = choice_to_ui_risk.get(choice_key, "WATCH")
-
-    # Extract calibrated confidence (0-100%) directly from decision.answers
     calibrated_confidence_pct = int(round(max(0.0, min(1.0, choice_conf)) * 100))
 
     return {
@@ -509,11 +565,7 @@ async def _run_stage2_neon_reasoning(
     shared_input: str,
     stage1_gate: dict[str, Any],
 ) -> tuple[Stage2ActionableReasoning, dict[str, Any], Optional[str]]:
-    """Stage 2 — Actionable Reasoning (`gemini-4-neon` on `client.interactions.create` with `thinking_level="medium"`).
-
-    Uses native JSON Schema Structured Outputs (`response_format`) to generate `visible_signals`,
-    `responder_summary`, and `resident_actions`.
-    """
+    """Stage 2 — Actionable Reasoning (`gemini-4-neon` on `client.interactions.create` with `thinking_level="medium"`)."""
     stage2_prompt = f"""{shared_input}
 
 STAGE 1 GEMINI DECISION 1 CALIBRATED PROBABILITIES & SCORES:
@@ -587,22 +639,22 @@ async def _evaluate_zone(
     async with ZONE_LOCKS[zone_id]:
         zone = ZONES[zone_id]
 
-        # 1. Fetch live Open-Meteo precipitation
+        # 1. Fetch live weather (Google Weather API primary, Open-Meteo fallback)
         try:
-            live_weather = await _fetch_open_meteo(zone["lat"], zone["lng"])
+            live_weather = await _fetch_live_weather(zone["lat"], zone["lng"])
         except httpx.HTTPError as exc:
-            logger.warning("Open-Meteo fetch error for %s: %s", zone_id, exc)
+            logger.warning("Weather fetch error for %s: %s", zone_id, exc)
             if simulated_rain_mm is None:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to fetch live weather from Open-Meteo: {exc}",
+                    detail=f"Failed to fetch live weather telemetry: {exc}",
                 ) from exc
             live_weather = {
                 "observed_precipitation_mm": 0.0,
                 "observed_rain_mm": 0.0,
                 "unit": "mm",
                 "observation_time": _utc_now_iso(),
-                "source": "Open-Meteo Unreachable (Using Cloudburst Override)",
+                "source": "Weather API Unreachable (Using Heavy Rain Override)",
             }
 
         effective_rain = (
@@ -623,7 +675,7 @@ async def _evaluate_zone(
 
         shared_input = _build_zone_input(zone, weather_snapshot, simulated_rain_mm)
 
-        # 2. Stage 1 — Fast Calibration Gate (gemini-decision-1 on beta_client.decisions.create)
+        # 2. Stage 1 — Fast Calibration Gate (gemini-decision-1)
         try:
             stage1_gate = await _run_stage1_decision_gate(v1beta_client, shared_input)
         except Exception as exc:
@@ -633,14 +685,13 @@ async def _evaluate_zone(
                 detail=f"Live Gemini Decision 1 API call failed: {exc}",
             ) from exc
 
-        # 3. Stage 2 — Actionable Reasoning (gemini-4-neon on client.interactions.create, thinking_level="medium")
+        # 3. Stage 2 — Actionable Reasoning (gemini-4-neon, thinking_level="medium")
         stage2_reasoning, routing_meta, interaction_id = await _run_stage2_neon_reasoning(
             v1_client=v1_client,
             shared_input=shared_input,
             stage1_gate=stage1_gate,
         )
 
-        # Combine Stage 1 calibrated risk/confidence/severity with Stage 2 structured reasoning
         eval_dict = {
             "risk_level": stage1_gate["mapped_risk_level"],
             "confidence_score": stage1_gate["calibrated_confidence_pct"],
@@ -649,7 +700,6 @@ async def _evaluate_zone(
             **stage2_reasoning.model_dump(),
         }
 
-        # 4. Hold in PENDING_REVIEW until responder clicks Approve & Broadcast
         now_iso = _utc_now_iso()
         zone["weather"] = weather_snapshot
         zone["latest_evaluation"] = eval_dict
@@ -680,10 +730,10 @@ async def _evaluate_zone(
 app = FastAPI(
     title="RainReady — Kochi Hyperlocal Flood Alert Engine",
     description=(
-        "Two-stage live flood alert workflow pairing Gemini Decision 1 (calibrated gate) "
-        "with Gemini 4 Neon (thinking_level='medium' structured reasoning) for Cloud Run."
+        "Two-stage live flood alert workflow pairing Google Weather API + Gemini Decision 1 "
+        "with Gemini 4 Neon (thinking_level='medium') for Google Cloud Run."
     ),
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
@@ -698,8 +748,9 @@ async def serve_index() -> FileResponse:
 
 @app.get("/api/health")
 async def health_check() -> dict[str, Any]:
-    load_dotenv()
-    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    load_dotenv(override=True)
+    has_gemini_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    has_weather_key = bool(os.environ.get("GOOGLE_WEATHER_API_KEY", "").strip())
     return {
         "status": "ok",
         "service": "rainready",
@@ -709,7 +760,9 @@ async def health_check() -> dict[str, Any]:
             "stage2_reasoning": MODEL_IDS["frontier_fast"],
             "thinking_level": "medium",
         },
-        "gemini_key_configured": has_key,
+        "weather_provider": "Google Maps Platform Weather API" if has_weather_key else "Open-Meteo Live API",
+        "gemini_key_configured": has_gemini_key,
+        "google_weather_key_configured": has_weather_key,
     }
 
 
@@ -753,7 +806,6 @@ async def submit_report(report_req: ReportRequest) -> dict[str, Any]:
     }
     ZONES[zone_id]["reports"].append(report_entry)
 
-    # Immediately re-run both gemini-decision-1 and gemini-4-neon so confidence and risk update live
     evaluation_result = await _evaluate_zone(
         zone_id=zone_id,
         simulated_rain_mm=report_req.simulated_rain_mm,

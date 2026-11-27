@@ -21,10 +21,12 @@ RainReady implements the two-stage hackathon architecture recommended in the Bui
 - `google/skills`: `cloud-run-basics`, `gcloud`, `gemini-api`, `finding-google-skills`
 
 ## Local Setup (< 2 Minutes)
-1. Paste your Google AI Studio key into `.env` (excluded via `.gitignore` and `.dockerignore`):
+1. Paste your Google AI Studio and Google Weather API keys into `.env` (excluded via `.gitignore` and `.dockerignore`):
    ```ini
    GEMINI_API_KEY=your_ai_studio_key
+   GOOGLE_WEATHER_API_KEY=your_google_weather_api_key
    ```
+   *(Uses **Google Maps Platform Weather API** `v1/currentConditions:lookup` for current QPF, 24-hour antecedent rainfall, and thunderstorm probability when `GOOGLE_WEATHER_API_KEY` is set, with automatic fallback to Open-Meteo.)*
 2. Install dependencies (`google-genai>=3.2.0`) and start on port `8080`:
    ```bash
    pip install -U -r requirements.txt
