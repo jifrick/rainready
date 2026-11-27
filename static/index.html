@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RainReady · Kochi Hyperlocal Flood Alert Engine</title>
+  <title>RainReady · Kochi Hyperlocal Flood Alert Engine (Gemini 4 + Decisions API)</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -54,7 +54,6 @@
       border: 1px solid #334155;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
     }
-    /* Custom thin dark scrollbars */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
@@ -83,14 +82,14 @@
           </svg>
         </div>
         <div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <h1 class="text-lg font-bold tracking-tight text-white">RainReady</h1>
             <span class="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/25">
               Kochi Metro Resilience
             </span>
           </div>
           <p class="text-xs text-slate-400">
-            Hyperlocal Flood Intelligence · Open-Meteo Telemetry + Live <span class="font-mono text-slate-300">gemini-2.5-flash</span> Structured Risk Engine
+            Open-Meteo Live + <span class="font-mono text-indigo-300">gemini-decision-1</span> Calibrated Gate → <span class="font-mono text-cyan-300">gemini-4-hydrogen / neon</span> Interactions Engine
           </p>
         </div>
       </div>
@@ -98,7 +97,7 @@
       <div class="flex items-center gap-2.5 flex-wrap">
         <div id="engine-pill" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
           <span id="engine-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
-          <span id="engine-text" class="font-mono text-slate-300">Checking Gemini Engine...</span>
+          <span id="engine-text" class="font-mono text-slate-300">Checking Gemini 4 Stack...</span>
         </div>
         <span class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] font-mono text-slate-400">
           Cloud Run: <strong class="text-slate-200 font-medium">geminisprints26blr-3834</strong>
@@ -106,7 +105,7 @@
         <button
           id="reset-demo-btn"
           type="button"
-          title="Clear reports and reset evaluations for a fresh demo run"
+          title="Clear reports and reset evaluations for a fresh 3-minute live demo run"
           class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-slate-300 transition cursor-pointer"
         >
           Reset Demo
@@ -149,12 +148,10 @@
 
       <!-- Active Approved Alerts Banner + Expandable "Why am I seeing this?" Drawer -->
       <div id="approved-alerts-container" class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl transition-all">
-        <!-- Populated dynamically from live state -->
       </div>
 
       <!-- Zone Quick-Selector Pills -->
       <div id="zone-tabs" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <!-- Populated dynamically -->
       </div>
 
       <!-- Interactive Leaflet Map Card -->
@@ -186,7 +183,7 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
           </svg>
-          <span id="map-loading-text">Querying Open-Meteo &amp; Gemini 2.5 Flash...</span>
+          <span id="map-loading-text">Running Decision 1 + Gemini 4...</span>
         </div>
       </div>
 
@@ -202,7 +199,7 @@
               1-Tap Report Waterlogging
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">
-              Tap a condition below to submit a live ground report for <strong id="report-zone-label" class="text-cyan-300">—</strong> and immediately re-run Gemini risk analysis.
+              Tap a condition below to submit a live ground report for <strong id="report-zone-label" class="text-cyan-300">—</strong> and immediately re-run Decision 1 + Gemini 4 analysis.
             </p>
           </div>
           <span id="report-count-badge" class="text-[11px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
@@ -261,9 +258,7 @@
           </button>
         </div>
 
-        <!-- Recent Ground Reports List -->
         <div id="recent-reports-list" class="mt-3 pt-3 border-t border-slate-800/80 hidden">
-          <!-- Populated dynamically -->
         </div>
       </div>
     </section>
@@ -285,7 +280,7 @@
           onclick="analyzeSelectedZone()"
           class="px-3 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-xs font-medium text-cyan-200 transition cursor-pointer disabled:opacity-50"
         >
-          ↻ Re-Run Live Gemini
+          ↻ Re-Run Live Gemini 4
         </button>
       </div>
 
@@ -300,18 +295,17 @@
               </span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">
-              Injects a severe 45.0 mm/hr monsoon cloudburst into <span class="font-mono text-slate-300">/api/analyze/{zone_id}</span> and triggers live Gemini 2.5 Flash re-evaluation.
+              Injects a severe 45.0 mm/hr monsoon cloudburst into <span class="font-mono text-slate-300">/api/analyze/{zone_id}</span> to demonstrate live Decision 1 escalation &amp; Gemini 4 synthesis.
             </p>
           </div>
 
-          <!-- Toggle Switch -->
           <button
             id="cloudburst-toggle"
             type="button"
             role="switch"
             aria-checked="false"
             onclick="toggleCloudburst()"
-            class="relative inline-flex h-7 w-13 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors duration-200 ease-in-out focus:outline-none"
+            class="relative inline-flex h-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors duration-200 ease-in-out focus:outline-none"
             style="width: 52px;"
           >
             <span
@@ -324,7 +318,6 @@
 
       <!-- Selected Zone Live Telemetry & Terrain Snapshot -->
       <div id="telemetry-card" class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl">
-        <!-- Populated dynamically -->
       </div>
 
       <!-- Human Reviewer Queue (Pending Review + Broadcast Gate) -->
@@ -342,7 +335,6 @@
         </div>
 
         <div id="reviewer-queue-list" class="space-y-3 flex-1">
-          <!-- Populated dynamically -->
         </div>
       </div>
     </aside>
@@ -350,9 +342,6 @@
   </main>
 
   <script>
-    // =========================================================================
-    // Application State (Zero hardcoded AI evaluations — 100% backend-driven)
-    // =========================================================================
     const state = {
       zones: {},
       zoneOrder: [],
@@ -433,7 +422,7 @@
       const reportBtns = document.querySelectorAll('.report-btn');
 
       if (zoneId) {
-        textEl.textContent = label || 'Querying Open-Meteo & Gemini 2.5 Flash...';
+        textEl.textContent = label || 'Querying Open-Meteo, Decision 1 & Gemini 4...';
         overlay.classList.remove('hidden');
         reanalyzeBtn.disabled = true;
         reportBtns.forEach(b => (b.disabled = true));
@@ -444,9 +433,6 @@
       }
     }
 
-    // =========================================================================
-    // Map Initialization & Polygon Rendering
-    // =========================================================================
     function initMap() {
       map = L.map('kochi-map', {
         center: [9.985, 76.295],
@@ -462,7 +448,6 @@
     }
 
     function getPolygonStyle(zone, isSelected) {
-      // Color reflects latest Gemini evaluation (Green=LOW, Yellow=WATCH, Red=HIGH)
       const evalObj = zone.latest_evaluation || zone.approved_alert;
       const riskKey = evalObj ? evalObj.risk_level : 'UNASSESSED';
       const theme = RISK_STYLES[riskKey] || RISK_STYLES.UNASSESSED;
@@ -501,7 +486,7 @@
         const evalObj = zone.latest_evaluation;
         const statusText = evalObj
           ? `${evalObj.risk_level} (${evalObj.confidence_score}% conf) · ${zone.review_status}`
-          : 'Click to run live Gemini 2.5 Flash analysis';
+          : 'Click to run live Decision 1 + Gemini 4 analysis';
 
         polygonLayers[zoneId].bindTooltip(
           `<div class="text-xs font-sans"><strong>${escapeHtml(zone.name)}</strong><br/>${escapeHtml(statusText)}</div>`,
@@ -520,9 +505,6 @@
       }
     }
 
-    // =========================================================================
-    // Backend API Calls
-    // =========================================================================
     async function checkEngineHealth() {
       try {
         const res = await fetch('/api/health');
@@ -531,11 +513,11 @@
         const txt = document.getElementById('engine-text');
         if (data.gemini_key_configured) {
           dot.className = 'w-2 h-2 rounded-full bg-emerald-400 shadow shadow-emerald-400/60';
-          txt.textContent = `${data.model} · Live Ready`;
+          txt.textContent = `${data.models.decision_gate} + ${data.models.workhorse} · Live`;
         } else {
           dot.className = 'w-2 h-2 rounded-full bg-rose-400 animate-pulse';
           txt.textContent = 'GEMINI_API_KEY Missing (.env)';
-          showError('GEMINI_API_KEY is not configured in .env yet. Add GEMINI_API_KEY=... to .env in the workspace to enable live Gemini evaluations.');
+          showError('GEMINI_API_KEY is not configured in .env yet. Paste your AI Studio key into .env to run live Gemini Decision 1 + Gemini 4 evaluations.');
         }
       } catch (err) {
         console.error('Health check failed:', err);
@@ -572,8 +554,6 @@
       syncMapPolygons(false);
       renderAll();
 
-      // Automatically run live Gemini evaluation when clicking a zone that hasn't been evaluated yet
-      // or whose active simulation mode differs from its last evaluation
       if (triggerAnalyzeIfNeeded && zone && !state.loadingZoneId) {
         const lastWasSim = Boolean(zone.weather && zone.weather.is_simulated);
         if (!zone.latest_evaluation || lastWasSim !== state.simulateCloudburst) {
@@ -595,8 +575,8 @@
       setLoading(
         zoneId,
         state.simulateCloudburst
-          ? `Simulating 45mm/hr Cloudburst on ${zone.name} via Gemini 2.5 Flash...`
-          : `Analyzing ${zone.name} with Open-Meteo + Gemini 2.5 Flash...`
+          ? `Simulating 45mm/hr Cloudburst on ${zone.name} (Decision 1 + Gemini 4)...`
+          : `Analyzing ${zone.name} via Open-Meteo, Decision 1 & Gemini 4...`
       );
 
       try {
@@ -614,9 +594,10 @@
           throw new Error(payload.detail || `Analyze request failed (${res.status})`);
         }
 
+        await checkEngineHealth();
         await loadZones(false);
       } catch (err) {
-        showError(err.message || 'Live Gemini risk analysis failed.');
+        showError(err.message || 'Live Gemini 4 risk analysis failed.');
       } finally {
         setLoading(null);
       }
@@ -631,7 +612,7 @@
       const zoneName = state.zones[zoneId]?.name || zoneId;
 
       hideError();
-      setLoading(zoneId, `Submitting "${depthType}" report & re-running Gemini 2.5 Flash for ${zoneName}...`);
+      setLoading(zoneId, `Submitting "${depthType}" report & re-scoring ${zoneName}...`);
 
       try {
         const res = await fetch('/api/report', {
@@ -702,9 +683,6 @@
       await loadZones(true);
     });
 
-    // =========================================================================
-    // UI Renderers
-    // =========================================================================
     function renderCloudburstToggle() {
       const btn = document.getElementById('cloudburst-toggle');
       const knob = document.getElementById('cloudburst-knob');
@@ -793,8 +771,8 @@
                 <p class="text-xs text-slate-400 mt-0.5">
                   ${
                     hasPending
-                      ? `Gemini 2.5 Flash has generated a live <strong class="text-amber-300">${escapeHtml(currentZone.latest_evaluation.risk_level)}</strong> assessment for <strong>${escapeHtml(currentZone.name)}</strong>. Click <strong>Approve &amp; Broadcast</strong> in the Responder Queue to publish it here.`
-                      : 'Select any Kochi zone on the map to run a live Gemini 2.5 Flash assessment, then approve it in the Responder Queue to broadcast verified guidance.'
+                      ? `Decision 1 + Gemini 4 generated a live <strong class="text-amber-300">${escapeHtml(currentZone.latest_evaluation.risk_level)}</strong> assessment for <strong>${escapeHtml(currentZone.name)}</strong>. Click <strong>Approve &amp; Broadcast</strong> in the Responder Queue to publish it here.`
+                      : 'Select any Kochi zone on the map to run a live Decision 1 + Gemini 4 assessment, then approve it in the Responder Queue to broadcast verified guidance.'
                   }
                 </p>
               </div>
@@ -804,7 +782,6 @@
         return;
       }
 
-      // Prioritize selected zone's approved alert at top, followed by any other approved alerts
       const sortedApproved = [...approvedZones].sort((a, b) => {
         if (a.id === state.selectedZoneId) return -1;
         if (b.id === state.selectedZoneId) return 1;
@@ -840,11 +817,10 @@
                   }
                 </div>
                 <span class="text-xs font-mono text-slate-400">
-                  AI Confidence: <strong class="text-slate-200">${alert.confidence_score}%</strong>
+                  Calibrated Confidence: <strong class="text-slate-200">${alert.confidence_score}%</strong>
                 </span>
               </div>
 
-              <!-- Plain-Language Resident Next Steps -->
               <div class="mt-3">
                 <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                   Recommended Next Steps for Residents &amp; Commuters
@@ -863,7 +839,6 @@
                 </ul>
               </div>
 
-              <!-- Expandable "Why am I seeing this?" Signal Breakdown Drawer -->
               <div class="mt-3 pt-2.5 border-t border-slate-800/80">
                 <button
                   type="button"
@@ -990,6 +965,48 @@
       `;
     }
 
+    function renderDecisionsStrip(zone) {
+      const dec = zone.decisions_telemetry;
+      const route = zone.routing_info;
+      if (!dec && !route) return '';
+
+      const modelBadge = route
+        ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">${escapeHtml(route.synthesis_model)} · thinking=${escapeHtml(route.thinking_level)}</span>`
+        : '';
+
+      if (!dec) {
+        return `<div class="mt-2.5 flex flex-wrap gap-1.5">${modelBadge}</div>`;
+      }
+
+      const hazardPct = Math.round(dec.hazard_probability * 100);
+      const stressVal = Number(dec.drainage_stress_score || 0).toFixed(2);
+
+      return `
+        <div class="mt-2.5 rounded-lg bg-indigo-950/25 border border-indigo-500/30 p-2.5 space-y-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <span class="text-[10px] font-mono uppercase tracking-wider text-indigo-300">
+              Stage 1 · ${escapeHtml(dec.model)} (0 output tokens)
+            </span>
+            ${modelBadge}
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
+            <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
+              <span class="text-slate-400 block text-[10px]">P(Hazard noul)</span>
+              <strong class="text-white">${hazardPct}%</strong>
+            </div>
+            <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
+              <span class="text-slate-400 block text-[10px]">Route Conf</span>
+              <strong class="text-white">${Math.round(dec.route_confidence * 100)}%</strong>
+            </div>
+            <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
+              <span class="text-slate-400 block text-[10px]">Drain Rubric</span>
+              <strong class="text-white">${stressVal} / 2.0</strong>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderReviewerQueue() {
       const listEl = document.getElementById('reviewer-queue-list');
       const badgeEl = document.getElementById('pending-count-badge');
@@ -998,7 +1015,6 @@
       const pendingCount = allZones.filter(z => z.review_status === 'PENDING_REVIEW').length;
       badgeEl.textContent = `${pendingCount} Pending`;
 
-      // Show evaluated zones, prioritizing selected zone & PENDING_REVIEW items
       const evaluatedZones = allZones
         .filter(z => z.latest_evaluation !== null)
         .sort((a, b) => {
@@ -1013,7 +1029,7 @@
         listEl.innerHTML = `
           <div class="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center">
             <p class="text-xs text-slate-400">
-              No AI evaluations in the queue yet. Click any zone on the map or click <strong>↻ Re-Run Live Gemini</strong> to generate a live risk assessment.
+              No AI evaluations in the queue yet. Click any zone on the map or click <strong>↻ Re-Run Live Gemini 4</strong> to generate a live risk assessment.
             </p>
           </div>
         `;
@@ -1037,7 +1053,6 @@
             <div class="rounded-xl border ${
               isSelected ? 'border-cyan-500/50 bg-slate-950/90' : 'border-slate-800 bg-slate-950/60'
             } p-3.5 transition">
-              <!-- Header Row -->
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <button
@@ -1061,10 +1076,9 @@
                 </span>
               </div>
 
-              <!-- Confidence Meter -->
               <div class="mt-2.5">
                 <div class="flex items-center justify-between text-xs mb-1">
-                  <span class="text-slate-400">Gemini Confidence Score</span>
+                  <span class="text-slate-400">Calibrated Confidence Score</span>
                   <span class="font-mono font-bold text-white">${ev.confidence_score}%</span>
                 </div>
                 <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -1075,7 +1089,8 @@
                 </div>
               </div>
 
-              <!-- Responder Summary -->
+              ${renderDecisionsStrip(zone)}
+
               <div class="mt-3 text-xs text-slate-200 leading-relaxed bg-slate-900/90 border border-slate-800/90 rounded-lg p-2.5">
                 <div class="text-[10px] font-mono uppercase tracking-wider text-indigo-300 mb-1">
                   Responder Assessment Summary
@@ -1083,7 +1098,6 @@
                 ${escapeHtml(ev.responder_summary)}
               </div>
 
-              <!-- Visible Reasoning Signals -->
               <div class="mt-2.5">
                 <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">
                   Visible Signals (${(ev.visible_signals || []).length})
@@ -1102,7 +1116,6 @@
                 </ul>
               </div>
 
-              <!-- Action Gate Footer -->
               <div class="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
                 <span class="text-[11px] font-mono text-slate-500">
                   Evaluated ${formatTime(zone.evaluated_at)} · ${zone.reports.length} report(s)
@@ -1141,14 +1154,10 @@
       renderReviewerQueue();
     }
 
-    // =========================================================================
-    // Boot Sequence
-    // =========================================================================
     (async function boot() {
       initMap();
       await checkEngineHealth();
       await loadZones(true);
-      // Trigger live Gemini evaluation on the initially selected Kochi zone
       if (state.selectedZoneId) {
         await analyzeZone(state.selectedZoneId);
       }

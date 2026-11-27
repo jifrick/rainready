@@ -32,6 +32,22 @@
       "skillPath": "skills/cloud/gemini-api/SKILL.md",
       "computedHash": "56789692d566b9fc75b6e8dd09ece8e53f03a74299cd25d6d264ecd5830b0ef3",
       "installMode": "copy"
+    },
+    "gemini-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "commit": "c4d0c62c1240e08a90546186bf320600ab6a039a",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-api-dev/SKILL.md",
+      "computedHash": "b3823bd7210e46d4528ca85ebc03326842a6df47ced9a856a1729639f9756c12",
+      "installMode": "copy"
+    },
+    "gemini-live-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "commit": "c4d0c62c1240e08a90546186bf320600ab6a039a",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-live-api-dev/SKILL.md",
+      "computedHash": "d3a558b43681fd11798a25c63650368be6c2623d0aba6fabe7835483d092509b",
+      "installMode": "copy"
     }
   }
 }

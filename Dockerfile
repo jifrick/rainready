@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application source only (.dockerignore excludes .env and agent skills)
-COPY main.py .
+COPY models.py main.py ./
 COPY static ./static
 
 # Run as non-root user per Google Cloud Run security best practices
