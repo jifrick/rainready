@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import math
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -58,19 +59,20 @@ STATIC_DIR = BASE_DIR / "static"
 CLOUD_RUN_PROJECT = "geminisprints26blr-3834"
 GOOGLE_FORECAST_HOURS_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 SLOT_LABELS = ["Now", "+1h", "+2h", "+3h", "+4h", "+5h"]
 
-SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Rainfall Intensity + Duration Flood Engine for Kochi, Kerala.
-Synthesize the 6-hour hourly rainfall forecast, pre-computed continuous rain duration & drainage threshold metrics, neighborhood terrain metadata, timestamped resident reports, and calibrated Gemini Decision 1 probabilities/scores:
+SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Rainfall Intensity + Duration Flood Engine.
+Synthesize the 6-hour hourly rainfall forecast, pre-computed continuous rain duration & drainage threshold metrics, proximity to known historical flood-prone hotspots, neighborhood terrain metadata, timestamped citizen water reports, and calibrated Gemini Decision 1 probabilities/scores:
 1. Populate `expected_rainfall_summary` with a crisp human-readable total (e.g., "135 mm expected over the next 3 hours" during heavy bursts, or "0.8 mm expected over the next 6 hours" when light).
 2. Populate `continuous_rain_hours` (sustained hours > 2.0 mm/hr) and `hours_until_flood_risk` (float hours until street flooding begins, or null when safe).
 3. Populate `duration_alert_headline`:
-   - When the zone is at WATCH or HIGH flood risk (or rainfall exceeds drainage thresholds / resident waterlogging is active), use this exact warning format:
+   - When the location is at WATCH or HIGH flood risk (or rainfall exceeds drainage thresholds / citizen waterlogging is active), use this exact warning format when rain-driven:
      "Flood risk in [Location] if rain continues at [X] mm/hr for [Y] hours."
-     (If resident reports already confirm active street flooding despite low forecast rain, state clearly that active waterlogging is reported in [Location] and any additional rain will worsen ponding.)
-   - When the zone is SAFE / LOW risk, write a clear, reassuring all-clear headline for [Location] (e.g., "No flood risk expected in [Location] over the next 6 hours.").
+     (If citizen reports already confirm active street waterlogging despite light forecast rain, clearly state active waterlogging is reported in [Location] and caution commuters immediately.)
+   - When the location is SAFE / LOW risk, write a clear, reassuring all-clear headline for [Location] (e.g., "No flood risk expected in [Location] over the next 6 hours.").
 4. Populate `hourly_breakdown` with all 6 forecast slots ("Now", "+1h", "+2h", "+3h", "+4h", "+5h") matching the provided hourly forecast rates and `exceeds_drain_capacity` flags.
-5. List exact causal drivers in `visible_signals`, write a concise verification note in `responder_summary`, and provide 2 to 3 plain-language `resident_actions` (e.g., moving parked vehicles to higher ground, avoiding underpasses).
+5. List exact causal drivers in `visible_signals`, write a concise verification note in `responder_summary`, and provide 2 to 3 plain-language `resident_actions` tailored to [Location].
 """
 
 
@@ -89,7 +91,7 @@ class HourlyBreakdownItem(BaseModel):
     )
     exceeds_drain_capacity: bool = Field(
         ...,
-        description="True when mm_per_hr >= the zone's drainage_threshold_mm_per_hr.",
+        description="True when mm_per_hr >= the location's drainage_threshold_mm_per_hr.",
     )
 
 
@@ -98,7 +100,7 @@ class Stage2ActionableReasoning(BaseModel):
         ...,
         min_length=2,
         max_length=6,
-        description="Exact observable flood risk signal drivers (rainfall rate, duration, elevation/drainage, resident reports).",
+        description="Exact observable flood risk signal drivers (rainfall rate, duration, historical flood hotspot proximity, resident reports).",
     )
     responder_summary: str = Field(
         ...,
@@ -147,8 +149,43 @@ class AnalyzeRequest(BaseModel):
     )
 
 
+class AnalyzeLocationRequest(BaseModel):
+    lat: float = Field(..., ge=-90.0, le=90.0, description="Latitude of GPS or clicked spot.")
+    lon: float = Field(..., ge=-180.0, le=180.0, description="Longitude of GPS or clicked spot.")
+    simulated_rain_mm: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=500.0,
+        description="Optional simulated 3-hour storm intensity override (mm/hr).",
+    )
+    is_gps: bool = Field(
+        default=False,
+        description="True when triggered from the user's live GPS location.",
+    )
+
+
 class ReportRequest(BaseModel):
-    zone_id: str = Field(..., description="Target Kochi neighborhood zone ID.")
+    zone_id: Optional[str] = Field(
+        default=None,
+        description="Optional target hotspot zone ID or dynamic spot ID.",
+    )
+    lat: Optional[float] = Field(
+        default=None,
+        ge=-90.0,
+        le=90.0,
+        description="Exact latitude for the live waterlogging map pin.",
+    )
+    lon: Optional[float] = Field(
+        default=None,
+        ge=-180.0,
+        le=180.0,
+        description="Exact longitude for the live waterlogging map pin.",
+    )
+    place_name: Optional[str] = Field(
+        default=None,
+        max_length=160,
+        description="Optional human-readable place name for the report pin.",
+    )
     depth: str = Field(
         ...,
         min_length=2,
@@ -169,195 +206,268 @@ class ReportRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 4 Kochi Neighborhood Zones with Drainage Thresholds & Saturation Duration
+# 8 Historical Flood-Prone Hotspots (4 Kochi + 4 Bengaluru)
 # ---------------------------------------------------------------------------
+def _make_zone(
+    zone_id: str,
+    city: str,
+    name: str,
+    subtitle: str,
+    lat: float,
+    lng: float,
+    elevation_m: float,
+    threshold_mm: float,
+    sat_hours: float,
+    impervious_pct: int,
+    canal_basin: str,
+    historical_flood_note: str,
+    coords: list[list[float]],
+) -> dict[str, Any]:
+    return {
+        "id": zone_id,
+        "city": city,
+        "is_custom_location": False,
+        "name": name,
+        "subtitle": subtitle,
+        "lat": lat,
+        "lng": lng,
+        "historical_flood_note": historical_flood_note,
+        "metadata": {
+            "elevation_m": elevation_m,
+            "drainage_capacity_mm_hr": threshold_mm,
+            "drainage_threshold_mm_per_hr": threshold_mm,
+            "saturation_hours": sat_hours,
+            "impervious_surface_pct": impervious_pct,
+            "canal_basin": canal_basin,
+            "drainage_profile": historical_flood_note,
+        },
+        "polygon": {
+            "type": "Feature",
+            "properties": {"zone_id": zone_id, "city": city},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [coords],
+            },
+        },
+        "reports": [],
+        "weather": None,
+        "latest_evaluation": None,
+        "decisions_telemetry": None,
+        "routing_info": None,
+        "last_interaction_id": None,
+        "review_status": "UNASSESSED",
+        "approved": False,
+        "evaluated_at": None,
+        "approved_alert": None,
+    }
+
+
 def _build_initial_zones() -> dict[str, dict[str, Any]]:
     return {
-        "south_railway_underpass": {
-            "id": "south_railway_underpass",
-            "name": "South Railway Underpass",
-            "subtitle": "Ernakulam Junction South · Karshaka Rd Sub-Grade Corridor",
-            "lat": 9.9696,
-            "lng": 76.2908,
-            "metadata": {
-                "elevation_m": 1.8,
-                "drainage_capacity_mm_hr": 25,
-                "drainage_threshold_mm_per_hr": 25.0,
-                "saturation_hours": 1.5,
-                "impervious_surface_pct": 89,
-                "canal_basin": "Perandoor Canal (180m east)",
-                "drainage_profile": (
-                    "Depressed railway box-culvert underpass collecting rapid sheet runoff from "
-                    "Karshaka Road and Ernakulam South yard; floods if >= 25 mm/hr continues for 1.5 hours."
-                ),
-            },
-            "polygon": {
-                "type": "Feature",
-                "properties": {"zone_id": "south_railway_underpass"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [
-                        [
-                            [76.2878, 9.9672],
-                            [76.2938, 9.9672],
-                            [76.2942, 9.9718],
-                            [76.2882, 9.9721],
-                            [76.2878, 9.9672],
-                        ]
-                    ],
-                },
-            },
-            "reports": [],
-            "weather": None,
-            "latest_evaluation": None,
-            "decisions_telemetry": None,
-            "routing_info": None,
-            "last_interaction_id": None,
-            "review_status": "UNASSESSED",
-            "approved": False,
-            "evaluated_at": None,
-            "approved_alert": None,
-        },
-        "panampilly_nagar": {
-            "id": "panampilly_nagar",
-            "name": "Panampilly Nagar",
-            "subtitle": "Main Avenue & Cross-Grid Residential Marsh Basin",
-            "lat": 9.9605,
-            "lng": 76.2975,
-            "metadata": {
-                "elevation_m": 2.4,
-                "drainage_capacity_mm_hr": 30,
-                "drainage_threshold_mm_per_hr": 30.0,
-                "saturation_hours": 2.5,
-                "impervious_surface_pct": 78,
-                "canal_basin": "Thevara–Perandoor Canal (adjacent)",
-                "drainage_profile": (
-                    "Reclaimed low-lying estuarine residential grid with covered slab drains along "
-                    "Main Avenue; waterlogs if >= 30 mm/hr continues for 2.5 hours."
-                ),
-            },
-            "polygon": {
-                "type": "Feature",
-                "properties": {"zone_id": "panampilly_nagar"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [
-                        [
-                            [76.2936, 9.9554],
-                            [76.3022, 9.9554],
-                            [76.3025, 9.9652],
-                            [76.2940, 9.9652],
-                            [76.2936, 9.9554],
-                        ]
-                    ],
-                },
-            },
-            "reports": [],
-            "weather": None,
-            "latest_evaluation": None,
-            "decisions_telemetry": None,
-            "routing_info": None,
-            "last_interaction_id": None,
-            "review_status": "UNASSESSED",
-            "approved": False,
-            "evaluated_at": None,
-            "approved_alert": None,
-        },
-        "mg_road_padma": {
-            "id": "mg_road_padma",
-            "name": "MG Road / Padma Junction",
-            "subtitle": "Central Commercial Spine · Mullassery Canal Catchment",
-            "lat": 9.9806,
-            "lng": 76.2836,
-            "metadata": {
-                "elevation_m": 2.1,
-                "drainage_capacity_mm_hr": 35,
-                "drainage_threshold_mm_per_hr": 35.0,
-                "saturation_hours": 2.0,
-                "impervious_surface_pct": 94,
-                "canal_basin": "Mullassery Canal (250m south-west)",
-                "drainage_profile": (
-                    "High-density paved commercial corridor along Kochi Metro viaduct; roadside "
-                    "box drains pool if >= 35 mm/hr continues for 2.0 hours."
-                ),
-            },
-            "polygon": {
-                "type": "Feature",
-                "properties": {"zone_id": "mg_road_padma"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [
-                        [
-                            [76.2798, 9.9762],
-                            [76.2874, 9.9762],
-                            [76.2878, 9.9848],
-                            [76.2801, 9.9850],
-                            [76.2798, 9.9762],
-                        ]
-                    ],
-                },
-            },
-            "reports": [],
-            "weather": None,
-            "latest_evaluation": None,
-            "decisions_telemetry": None,
-            "routing_info": None,
-            "last_interaction_id": None,
-            "review_status": "UNASSESSED",
-            "approved": False,
-            "evaluated_at": None,
-            "approved_alert": None,
-        },
-        "edappally_toll": {
-            "id": "edappally_toll",
-            "name": "Edappally Toll Junction",
-            "subtitle": "NH-66 / NH-544 Arterial Convergence · Edappally Thodu",
-            "lat": 10.0261,
-            "lng": 76.3083,
-            "metadata": {
-                "elevation_m": 3.6,
-                "drainage_capacity_mm_hr": 30,
-                "drainage_threshold_mm_per_hr": 30.0,
-                "saturation_hours": 2.0,
-                "impervious_surface_pct": 91,
-                "canal_basin": "Edappally Thodu (320m west)",
-                "drainage_profile": (
-                    "Major national highway and flyover ramp catchment channeling heavy asphalt "
-                    "runoff toward Edappally Thodu; floods if >= 30 mm/hr continues for 2.0 hours."
-                ),
-            },
-            "polygon": {
-                "type": "Feature",
-                "properties": {"zone_id": "edappally_toll"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [
-                        [
-                            [76.3038, 10.0218],
-                            [76.3128, 10.0218],
-                            [76.3131, 10.0304],
-                            [76.3041, 10.0306],
-                            [76.3038, 10.0218],
-                        ]
-                    ],
-                },
-            },
-            "reports": [],
-            "weather": None,
-            "latest_evaluation": None,
-            "decisions_telemetry": None,
-            "routing_info": None,
-            "last_interaction_id": None,
-            "review_status": "UNASSESSED",
-            "approved": False,
-            "evaluated_at": None,
-            "approved_alert": None,
-        },
+        # --- KOCHI HISTORICAL FLOOD HOTSPOTS ---
+        "south_railway_underpass": _make_zone(
+            zone_id="south_railway_underpass",
+            city="Kochi",
+            name="South Railway Underpass",
+            subtitle="Kochi · Ernakulam Junction South · Karshaka Rd",
+            lat=9.9696,
+            lng=76.2908,
+            elevation_m=1.8,
+            threshold_mm=25.0,
+            sat_hours=1.5,
+            impervious_pct=89,
+            canal_basin="Perandoor Canal (180m east)",
+            historical_flood_note=(
+                "Low-lying railway box-culvert underpass (1.8m MSL); historically floods within "
+                "90 mins of >=25 mm/hr rain or Perandoor Canal tidal surcharge."
+            ),
+            coords=[
+                [76.2878, 9.9672],
+                [76.2938, 9.9672],
+                [76.2942, 9.9718],
+                [76.2882, 9.9721],
+                [76.2878, 9.9672],
+            ],
+        ),
+        "panampilly_nagar": _make_zone(
+            zone_id="panampilly_nagar",
+            city="Kochi",
+            name="Panampilly Nagar / TP Canal",
+            subtitle="Kochi · Main Avenue & Thevara–Perandoor Canal Grid",
+            lat=9.9605,
+            lng=76.2975,
+            elevation_m=2.4,
+            threshold_mm=30.0,
+            sat_hours=2.5,
+            impervious_pct=78,
+            canal_basin="Thevara–Perandoor Canal (adjacent)",
+            historical_flood_note=(
+                "Reclaimed low-lying marshland grid bordering Thevara–Perandoor Canal; historically "
+                "waterlogs internal cross-roads when >=30 mm/hr rain persists for 2.5 hours."
+            ),
+            coords=[
+                [76.2936, 9.9554],
+                [76.3022, 9.9554],
+                [76.3025, 9.9652],
+                [76.2940, 9.9652],
+                [76.2936, 9.9554],
+            ],
+        ),
+        "mg_road_padma": _make_zone(
+            zone_id="mg_road_padma",
+            city="Kochi",
+            name="MG Road / Padma Junction",
+            subtitle="Kochi · Central Commercial Spine · Mullassery Basin",
+            lat=9.9806,
+            lng=76.2836,
+            elevation_m=2.1,
+            threshold_mm=35.0,
+            sat_hours=2.0,
+            impervious_pct=94,
+            canal_basin="Mullassery Canal (250m south-west)",
+            historical_flood_note=(
+                "94% impervious commercial corridor draining to Mullassery Canal; silted box drains "
+                "historically pool curb-to-shopfront within 2 hours of >=35 mm/hr rain."
+            ),
+            coords=[
+                [76.2798, 9.9762],
+                [76.2874, 9.9762],
+                [76.2878, 9.9848],
+                [76.2801, 9.9850],
+                [76.2798, 9.9762],
+            ],
+        ),
+        "edappally_toll": _make_zone(
+            zone_id="edappally_toll",
+            city="Kochi",
+            name="Edappally Toll Junction",
+            subtitle="Kochi · NH-66 / NH-544 Convergence · Edappally Thodu",
+            lat=10.0261,
+            lng=76.3083,
+            elevation_m=3.6,
+            threshold_mm=30.0,
+            sat_hours=2.0,
+            impervious_pct=91,
+            canal_basin="Edappally Thodu (320m west)",
+            historical_flood_note=(
+                "Major highway & flyover ramp catchment funneling sheet runoff toward Edappally Thodu; "
+                "service lanes historically flood after 2 hours of >=30 mm/hr rain."
+            ),
+            coords=[
+                [76.3038, 10.0218],
+                [76.3128, 10.0218],
+                [76.3131, 10.0304],
+                [76.3041, 10.0306],
+                [76.3038, 10.0218],
+            ],
+        ),
+        # --- BENGALURU HISTORICAL FLOOD HOTSPOTS ---
+        "silk_board_junction": _make_zone(
+            zone_id="silk_board_junction",
+            city="Bengaluru",
+            name="Silk Board Junction",
+            subtitle="Bengaluru · Hosur Rd / Outer Ring Rd Valley Depression",
+            lat=12.9177,
+            lng=77.6233,
+            elevation_m=886.0,
+            threshold_mm=28.0,
+            sat_hours=1.5,
+            impervious_pct=93,
+            canal_basin="Madiwala Lake Stormwater Valley",
+            historical_flood_note=(
+                "Low-point arterial interchange in the Roopena Agrahara–Madiwala valley; service lanes "
+                "and flyover ramps historically flood within 90 mins of >=28 mm/hr rain."
+            ),
+            coords=[
+                [77.6192, 12.9145],
+                [77.6275, 12.9145],
+                [77.6278, 12.9212],
+                [77.6195, 12.9212],
+                [77.6192, 12.9145],
+            ],
+        ),
+        "bellandur_orr": _make_zone(
+            zone_id="bellandur_orr",
+            city="Bengaluru",
+            name="Bellandur / Outer Ring Road",
+            subtitle="Bengaluru · EcoSpace Tech Corridor · Bellandur Rajakaluve",
+            lat=12.9304,
+            lng=77.6784,
+            elevation_m=879.0,
+            threshold_mm=25.0,
+            sat_hours=1.5,
+            impervious_pct=90,
+            canal_basin="Bellandur–Varthur Lake Rajakaluve",
+            historical_flood_note=(
+                "Reclaimed wetland tech corridor astride the primary Bellandur Lake rajakaluve outfall; "
+                "historically inundates ORR service roads within 90 mins of >=25 mm/hr downpours."
+            ),
+            coords=[
+                [77.6732, 12.9262],
+                [77.6836, 12.9262],
+                [77.6840, 12.9348],
+                [77.6736, 12.9348],
+                [77.6732, 12.9262],
+            ],
+        ),
+        "koramangala_4th_block": _make_zone(
+            zone_id="koramangala_4th_block",
+            city="Bengaluru",
+            name="Koramangala 4th Block",
+            subtitle="Bengaluru · 80 Feet Rd & ST Bed Stormwater Valley",
+            lat=12.9344,
+            lng=77.6266,
+            elevation_m=883.0,
+            threshold_mm=30.0,
+            sat_hours=2.0,
+            impervious_pct=86,
+            canal_basin="K-100 Citizens Waterway / Bellandur Feeder Drain",
+            historical_flood_note=(
+                "Low-lying residential basin bordering ST Bed and primary rajakaluve feeder; "
+                "historically experiences street waterlogging after 2 hours of >=30 mm/hr rain."
+            ),
+            coords=[
+                [77.6222, 12.9308],
+                [77.6310, 12.9308],
+                [77.6313, 12.9382],
+                [77.6225, 12.9382],
+                [77.6222, 12.9308],
+            ],
+        ),
+        "manyata_hebbal": _make_zone(
+            zone_id="manyata_hebbal",
+            city="Bengaluru",
+            name="Manyata Tech Park / Hebbal",
+            subtitle="Bengaluru · Nagawara Lake & Hebbal Ring Rd Catchment",
+            lat=13.0452,
+            lng=77.6208,
+            elevation_m=892.0,
+            threshold_mm=30.0,
+            sat_hours=2.0,
+            impervious_pct=88,
+            canal_basin="Hebbal–Nagawara Lake Chain",
+            historical_flood_note=(
+                "Depressed Ring Road & tech-campus drainage apron upstream of Nagawara Lake; "
+                "historically pools rapidly when >=30 mm/hr cloudbursts exceed culvert capacity."
+            ),
+            coords=[
+                [77.6158, 13.0412],
+                [77.6258, 13.0412],
+                [77.6262, 13.0494],
+                [77.6162, 13.0494],
+                [77.6158, 13.0412],
+            ],
+        ),
     }
 
 
 ZONES: dict[str, dict[str, Any]] = _build_initial_zones()
+DYNAMIC_LOCATIONS: dict[str, dict[str, Any]] = {}
+ALL_REPORTS: list[dict[str, Any]] = []
+GEOCODE_CACHE: dict[tuple[float, float], dict[str, str]] = {}
+
 ZONE_LOCKS: dict[str, asyncio.Lock] = {zid: asyncio.Lock() for zid in ZONES}
+GLOBAL_LOC_LOCK = asyncio.Lock()
 
 _http_client: Optional[httpx.AsyncClient] = None
 
@@ -380,6 +490,36 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _find_nearest_hotspot(lat: float, lon: float) -> tuple[dict[str, Any], float]:
+    best_zone: Optional[dict[str, Any]] = None
+    best_dist = float("inf")
+    for z in ZONES.values():
+        d = _haversine_km(lat, lon, z["lat"], z["lng"])
+        if d < best_dist:
+            best_dist = d
+            best_zone = z
+    assert best_zone is not None
+    return best_zone, round(best_dist, 2)
+
+
+def _reports_near_point(lat: float, lon: float, radius_km: float = 2.0) -> list[dict[str, Any]]:
+    return [
+        r
+        for r in ALL_REPORTS
+        if _haversine_km(lat, lon, float(r["lat"]), float(r["lon"])) <= radius_km
+    ]
+
+
 def _format_hour_clock(hour_24: Optional[int]) -> str:
     if hour_24 is None:
         return ""
@@ -389,15 +529,90 @@ def _format_hour_clock(hour_24: Optional[int]) -> str:
     return f"{h12} {suffix}"
 
 
-async def _http_get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
+async def _http_get_json(
+    url: str, params: dict[str, Any], headers: Optional[dict[str, str]] = None
+) -> dict[str, Any]:
     if _http_client is not None:
-        resp = await _http_client.get(url, params=params)
+        resp = await _http_client.get(url, params=params, headers=headers)
         resp.raise_for_status()
         return resp.json()
     async with httpx.AsyncClient(timeout=10.0) as fallback_client:
-        resp = await fallback_client.get(url, params=params)
+        resp = await fallback_client.get(url, params=params, headers=headers)
         resp.raise_for_status()
         return resp.json()
+
+
+async def _reverse_geocode(lat: float, lon: float) -> dict[str, str]:
+    """Reverse-geocode {lat, lon} using OpenStreetMap Nominatim (`User-Agent: RainReady-App`)."""
+    cache_key = (round(lat, 3), round(lon, 3))
+    if cache_key in GEOCODE_CACHE:
+        return GEOCODE_CACHE[cache_key]
+
+    nearest, dist_km = _find_nearest_hotspot(lat, lon)
+    fallback_city = nearest["city"] if dist_km < 30.0 else "Local Area"
+    fallback_name = (
+        f"Near {nearest['name']}"
+        if dist_km <= 1.2
+        else f"Location ({lat:.4f}°N, {lon:.4f}°E)"
+    )
+
+    try:
+        data = await _http_get_json(
+            NOMINATIM_REVERSE_URL,
+            params={
+                "format": "json",
+                "lat": lat,
+                "lon": lon,
+                "zoom": 17,
+                "addressdetails": 1,
+            },
+            headers={
+                "User-Agent": "RainReady-App",
+                "Accept-Language": "en",
+            },
+        )
+        addr = data.get("address", {}) or {}
+        area = (
+            addr.get("neighbourhood")
+            or addr.get("suburb")
+            or addr.get("road")
+            or addr.get("quarter")
+            or addr.get("residential")
+            or addr.get("village")
+        )
+        city = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("municipality")
+            or addr.get("state_district")
+            or addr.get("state")
+            or fallback_city
+        )
+        if area and city and area.lower() != city.lower():
+            place_name = f"{area}, {city}"
+        elif area:
+            place_name = area
+        elif data.get("name"):
+            place_name = f"{data['name']}, {city}" if city else str(data["name"])
+        else:
+            place_name = fallback_name
+
+        subtitle = data.get("display_name", f"{lat:.4f}°N, {lon:.4f}°E")
+        short_sub = ", ".join(p.strip() for p in subtitle.split(",")[:4])
+        resolved = {
+            "place_name": place_name,
+            "city": str(city),
+            "subtitle": short_sub or f"{lat:.4f}°N, {lon:.4f}°E",
+        }
+        GEOCODE_CACHE[cache_key] = resolved
+        return resolved
+    except Exception as exc:
+        logger.warning("Nominatim reverse-geocode fallback for (%s, %s): %s", lat, lon, exc)
+        return {
+            "place_name": fallback_name,
+            "city": fallback_city,
+            "subtitle": f"{lat:.4f}°N, {lon:.4f}°E",
+        }
 
 
 async def _fetch_google_6h_forecast(
@@ -452,13 +667,13 @@ async def _fetch_google_6h_forecast(
 
 
 async def _fetch_open_meteo_6h_forecast(lat: float, lng: float) -> dict[str, Any]:
-    """Automatic 6-hour fallback using Open-Meteo (`hourly=precipitation,precipitation_probability&forecast_hours=6`)."""
+    """Automatic 6-hour fallback using Open-Meteo."""
     params = {
         "latitude": lat,
         "longitude": lng,
         "hourly": "precipitation,precipitation_probability",
         "forecast_hours": 6,
-        "timezone": "Asia/Kolkata",
+        "timezone": "auto",
     }
     payload = await _http_get_json(OPEN_METEO_URL, params)
     hourly = payload.get("hourly", {}) or {}
@@ -499,7 +714,6 @@ async def _fetch_open_meteo_6h_forecast(lat: float, lng: float) -> dict[str, Any
 
 
 async def _fetch_live_6h_forecast(lat: float, lng: float) -> dict[str, Any]:
-    """Primary: Google Weather API 6-hour forecast; Fallback: Open-Meteo 6-hour forecast."""
     load_dotenv(override=True)
     weather_key = os.environ.get("GOOGLE_WEATHER_API_KEY", "").strip()
     if weather_key:
@@ -515,7 +729,6 @@ def _compute_rain_and_duration_metrics(
     base_forecast: dict[str, Any],
     simulated_rain_mm: Optional[float],
 ) -> dict[str, Any]:
-    """Apply optional 3-hour continuous storm injection and pre-compute duration flood metrics."""
     meta = zone["metadata"]
     threshold_mm = float(meta["drainage_threshold_mm_per_hr"])
     sat_hours = float(meta["saturation_hours"])
@@ -538,7 +751,6 @@ def _compute_rain_and_duration_metrics(
 
     live_baseline_now_mm = float(raw_hours[0]["mm_per_hr"])
 
-    # When Test Heavy Rain (45mm/hr) is toggled on, inject a simulated 3-hour continuous 45 mm/hr storm
     if simulated_rain_mm is not None:
         sim_val = round(float(simulated_rain_mm), 2)
         for i in range(min(3, len(raw_hours))):
@@ -546,7 +758,6 @@ def _compute_rain_and_duration_metrics(
             raw_hours[i]["probability_pct"] = max(int(raw_hours[i].get("probability_pct", 0)), 95)
             raw_hours[i]["condition_text"] = "Simulated Heavy Cloudburst"
 
-    # Annotate each hour against this neighborhood's drainage threshold
     for h in raw_hours:
         h["exceeds_drain_capacity"] = bool(float(h["mm_per_hr"]) >= threshold_mm)
 
@@ -554,7 +765,6 @@ def _compute_rain_and_duration_metrics(
     expected_6h_total_mm = round(sum(float(h["mm_per_hr"]) for h in raw_hours), 2)
     expected_3h_total_mm = round(sum(float(h["mm_per_hr"]) for h in raw_hours[:3]), 2)
 
-    # Longest consecutive window > 2.0 mm/hr across the 6-hour forecast
     max_continuous = 0
     curr_streak = 0
     for h in raw_hours:
@@ -565,7 +775,6 @@ def _compute_rain_and_duration_metrics(
             curr_streak = 0
     continuous_rain_hours = float(max_continuous)
 
-    # Consecutive hours >= zone's drainage threshold
     max_exceed_streak = 0
     exceed_rates: list[float] = []
     curr_ex = 0
@@ -582,15 +791,12 @@ def _compute_rain_and_duration_metrics(
             curr_ex = 0
             curr_rates = []
 
-    # Estimate hours to flood from zone drainage capacity & saturation duration
-    # Required saturation volume ~ threshold_mm * saturation_hours
     estimated_hours_to_flood: Optional[float] = None
     saturation_volume_mm = threshold_mm * sat_hours
     if max_exceed_streak > 0 and exceed_rates:
         avg_exceed_rate = sum(exceed_rates) / len(exceed_rates)
         storm_volume_mm = avg_exceed_rate * max_exceed_streak
         if max_exceed_streak >= sat_hours or storm_volume_mm >= (saturation_volume_mm * 0.85):
-            # Higher rainfall intensity saturates storm drains proportionally faster, bounded cleanly
             est = sat_hours * (threshold_mm / max(avg_exceed_rate, threshold_mm))
             estimated_hours_to_flood = round(max(0.5, min(sat_hours, est)), 1)
 
@@ -618,17 +824,21 @@ def _compute_rain_and_duration_metrics(
     }
 
 
-def _build_zone_input(zone: dict[str, Any], weather: dict[str, Any]) -> str:
+def _build_zone_input(
+    zone: dict[str, Any],
+    weather: dict[str, Any],
+    nearest_hotspot_context: Optional[str] = None,
+) -> str:
     meta = zone["metadata"]
     reports = zone["reports"]
 
     if reports:
         formatted_reports = "\n".join(
-            f"  - [{r['timestamp']}] {r['depth']}: {r['description']}"
+            f"  - [{r['timestamp']}] {r['depth']} at {r.get('place_name', zone['name'])}: {r['description']}"
             for r in reports[-15:]
         )
     else:
-        formatted_reports = "  - None reported in this zone yet."
+        formatted_reports = "  - None reported near this location yet."
 
     hourly_lines = "\n".join(
         f"  - {h['hour_label']} ({h.get('clock_label') or 'forecast'}): "
@@ -644,15 +854,20 @@ def _build_zone_input(zone: dict[str, Any], weather: dict[str, Any]) -> str:
         else f"LIVE FORECAST TELEMETRY ({weather['source']})."
     )
 
-    return f"""KOCHI HYPERLOCAL RAINFALL INTENSITY + DURATION TELEMETRY
-Location / Zone Name: {zone['name']} ({zone['subtitle']}) [id={zone['id']}]
+    hotspot_line = (
+        f"\nHistorical Hotspot Context: {nearest_hotspot_context}"
+        if nearest_hotspot_context
+        else f"\nHistorical Flood Note: {zone.get('historical_flood_note', meta['drainage_profile'])}"
+    )
+
+    return f"""HYPERLOCAL RAINFALL INTENSITY + DURATION TELEMETRY
+Location Name: {zone['name']} ({zone['subtitle']}) [id={zone['id']}, city={zone.get('city', 'Urban')}]
 Coordinates: {zone['lat']}, {zone['lng']}
 Baseline Elevation: {meta['elevation_m']}m above MSL
 Drainage Threshold: {meta['drainage_threshold_mm_per_hr']} mm/hr
 Saturation Window: Floods if >= {meta['drainage_threshold_mm_per_hr']} mm/hr continues for {meta['saturation_hours']} hours
 Impervious Surface Coverage: {meta['impervious_surface_pct']}%
-Canal / Outfall Basin: {meta['canal_basin']}
-Terrain & Drainage Notes: {meta['drainage_profile']}
+Canal / Outfall Basin: {meta['canal_basin']}{hotspot_line}
 
 6-HOUR FORECAST & PRE-COMPUTED DURATION METRICS:
 - Mode: {sim_banner}
@@ -667,7 +882,7 @@ Terrain & Drainage Notes: {meta['drainage_profile']}
 NEXT 6 HOURS BREAKDOWN:
 {hourly_lines}
 
-RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
+NEARBY CITIZEN WATERLOGGING REPORTS ({len(reports)} total):
 {formatted_reports}"""
 
 
@@ -695,15 +910,15 @@ async def _run_stage1_decision_gate(
         questions={
             "escalate_alert": {
                 "type": "noul",
-                "instructions": "Should this zone trigger a flood watch or warning based on forecast rainfall intensity, sustained duration, and resident reports?",
+                "instructions": "Should this location trigger a flood watch or warning based on forecast rainfall intensity, sustained duration, historical flood vulnerability, and citizen reports?",
             },
             "risk_level": {
                 "type": "choice",
-                "instructions": "Classify the flood risk level for this Kochi neighborhood over the current and upcoming 6-hour rainfall window.",
+                "instructions": "Classify the flood risk level for this neighborhood over the current and upcoming 6-hour rainfall window.",
                 "criteria": {
                     "high_danger": (
-                        "Sustained heavy rain exceeding the zone's drainage threshold across its saturation window, "
-                        "active >=30mm/hr cloudburst, or knee-deep resident waterlogging reports."
+                        "Sustained heavy rain exceeding the street's drainage threshold across its saturation window, "
+                        "active >=30mm/hr cloudburst, or knee-deep citizen waterlogging reports."
                     ),
                     "low_risk": (
                         "Dry or light rainfall safely below the street's drainage threshold with no hazardous waterlogging reports."
@@ -848,115 +1063,218 @@ HEADLINE & DURATION INSTRUCTIONS FOR {zone['name']}:
     )
 
 
+async def _evaluate_target_record(
+    target: dict[str, Any],
+    simulated_rain_mm: Optional[float] = None,
+    nearest_hotspot_context: Optional[str] = None,
+) -> dict[str, Any]:
+    v1_client, v1beta_client = _init_genai_clients()
+
+    try:
+        base_forecast = await _fetch_live_6h_forecast(target["lat"], target["lng"])
+    except Exception as exc:
+        logger.warning("6h forecast fetch error for %s: %s", target["id"], exc)
+        if simulated_rain_mm is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch live 6-hour weather forecast: {exc}",
+            ) from exc
+        base_forecast = {
+            "hourly_records": [
+                {
+                    "slot_index": i,
+                    "hour_label": SLOT_LABELS[i],
+                    "display_hour": None,
+                    "clock_label": "",
+                    "mm_per_hr": 0.0,
+                    "probability_pct": 0,
+                    "thunderstorm_probability_pct": 0,
+                    "condition_text": "Simulated Override",
+                }
+                for i in range(6)
+            ],
+            "condition_text": "Simulated Heavy Rain Override",
+            "thunderstorm_probability_pct": 0,
+            "observation_time": _utc_now_iso(),
+            "source": "Weather API Unreachable (Using 3h Storm Override)",
+        }
+
+    weather_snapshot = _compute_rain_and_duration_metrics(
+        zone=target,
+        base_forecast=base_forecast,
+        simulated_rain_mm=simulated_rain_mm,
+    )
+    shared_input = _build_zone_input(
+        zone=target,
+        weather=weather_snapshot,
+        nearest_hotspot_context=nearest_hotspot_context,
+    )
+
+    try:
+        stage1_gate = await _run_stage1_decision_gate(v1beta_client, shared_input)
+    except Exception as exc:
+        logger.exception("Stage 1 gemini-decision-1 call failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Live Gemini Decision 1 API call failed: {exc}",
+        ) from exc
+
+    stage2_reasoning, routing_meta, interaction_id = await _run_stage2_neon_reasoning(
+        v1_client=v1_client,
+        zone=target,
+        weather=weather_snapshot,
+        shared_input=shared_input,
+        stage1_gate=stage1_gate,
+    )
+
+    eval_dict = {
+        "risk_level": stage1_gate["mapped_risk_level"],
+        "confidence_score": stage1_gate["calibrated_confidence_pct"],
+        "severity_score": stage1_gate["severity_score"],
+        "escalate_alert_prob": stage1_gate["escalate_alert_prob"],
+        **stage2_reasoning.model_dump(),
+    }
+
+    now_iso = _utc_now_iso()
+    target["weather"] = weather_snapshot
+    target["latest_evaluation"] = eval_dict
+    target["decisions_telemetry"] = stage1_gate
+    target["routing_info"] = routing_meta
+    target["last_interaction_id"] = interaction_id
+    target["review_status"] = "PENDING_REVIEW"
+    target["approved"] = False
+    target["evaluated_at"] = now_iso
+
+    return {
+        **eval_dict,
+        "zone_id": target["id"],
+        "is_custom_location": target.get("is_custom_location", False),
+        "name": target["name"],
+        "subtitle": target["subtitle"],
+        "city": target.get("city", ""),
+        "lat": target["lat"],
+        "lng": target["lng"],
+        "historical_flood_note": target.get("historical_flood_note", ""),
+        "metadata": target["metadata"],
+        "nearest_hotspot": target.get("nearest_hotspot"),
+        "review_status": target["review_status"],
+        "approved": target["approved"],
+        "evaluated_at": now_iso,
+        "weather": weather_snapshot,
+        "decisions_telemetry": stage1_gate,
+        "routing_info": routing_meta,
+        "interaction_id": interaction_id,
+        "report_count": len(target["reports"]),
+    }
+
+
 async def _evaluate_zone(
     zone_id: str, simulated_rain_mm: Optional[float] = None
 ) -> dict[str, Any]:
     if zone_id not in ZONES:
         raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
 
-    v1_client, v1beta_client = _init_genai_clients()
-
     async with ZONE_LOCKS[zone_id]:
-        zone = ZONES[zone_id]
-
-        # 1. Fetch live 6-hour forecast (Google Weather API primary, Open-Meteo fallback)
-        try:
-            base_forecast = await _fetch_live_6h_forecast(zone["lat"], zone["lng"])
-        except Exception as exc:
-            logger.warning("6h forecast fetch error for %s: %s", zone_id, exc)
-            if simulated_rain_mm is None:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to fetch live 6-hour weather forecast: {exc}",
-                ) from exc
-            base_forecast = {
-                "hourly_records": [
-                    {
-                        "slot_index": i,
-                        "hour_label": SLOT_LABELS[i],
-                        "display_hour": None,
-                        "clock_label": "",
-                        "mm_per_hr": 0.0,
-                        "probability_pct": 0,
-                        "thunderstorm_probability_pct": 0,
-                        "condition_text": "Simulated Override",
-                    }
-                    for i in range(6)
-                ],
-                "condition_text": "Simulated Heavy Rain Override",
-                "thunderstorm_probability_pct": 0,
-                "observation_time": _utc_now_iso(),
-                "source": "Weather API Unreachable (Using 3h Storm Override)",
-            }
-
-        weather_snapshot = _compute_rain_and_duration_metrics(
-            zone=zone,
-            base_forecast=base_forecast,
+        return await _evaluate_target_record(
+            target=ZONES[zone_id],
             simulated_rain_mm=simulated_rain_mm,
         )
-        shared_input = _build_zone_input(zone, weather_snapshot)
 
-        # 2. Stage 1 — Fast Calibration Gate (gemini-decision-1)
-        try:
-            stage1_gate = await _run_stage1_decision_gate(v1beta_client, shared_input)
-        except Exception as exc:
-            logger.exception("Stage 1 gemini-decision-1 call failed: %s", exc)
-            raise HTTPException(
-                status_code=502,
-                detail=f"Live Gemini Decision 1 API call failed: {exc}",
-            ) from exc
 
-        # 3. Stage 2 — Actionable Reasoning + Duration Headline (gemini-4-neon, thinking_level="medium")
-        stage2_reasoning, routing_meta, interaction_id = await _run_stage2_neon_reasoning(
-            v1_client=v1_client,
-            zone=zone,
-            weather=weather_snapshot,
-            shared_input=shared_input,
-            stage1_gate=stage1_gate,
+async def _evaluate_custom_location(
+    lat: float,
+    lon: float,
+    simulated_rain_mm: Optional[float] = None,
+    is_gps: bool = False,
+) -> dict[str, Any]:
+    geo = await _reverse_geocode(lat, lon)
+    nearest_zone, dist_km = _find_nearest_hotspot(lat, lon)
+    near_hotspot = dist_km <= 1.5
+
+    spot_key = f"loc_{round(lat, 3)}_{round(lon, 3)}".replace("-", "m").replace(".", "_")
+
+    if near_hotspot:
+        threshold_mm = float(nearest_zone["metadata"]["drainage_threshold_mm_per_hr"])
+        sat_hours = float(nearest_zone["metadata"]["saturation_hours"])
+        elev_m = float(nearest_zone["metadata"]["elevation_m"])
+        impervious_pct = int(nearest_zone["metadata"]["impervious_surface_pct"])
+        basin = nearest_zone["metadata"]["canal_basin"]
+        hist_note = (
+            f"{dist_km:.2f} km from {nearest_zone['name']} flood hotspot — "
+            f"{nearest_zone['historical_flood_note']}"
+        )
+    else:
+        threshold_mm = 32.0
+        sat_hours = 2.0
+        elev_m = float(nearest_zone["metadata"]["elevation_m"]) if dist_km < 35.0 else 15.0
+        impervious_pct = 82
+        basin = f"Urban storm drain network ({dist_km:.1f} km from {nearest_zone['name']})"
+        hist_note = (
+            f"Outside primary mapped flood hotspots (nearest: {nearest_zone['name']}, {dist_km:.1f} km away). "
+            f"Standard urban storm-drain threshold (~32 mm/hr for 2.0h) applied."
         )
 
-        eval_dict = {
-            "risk_level": stage1_gate["mapped_risk_level"],
-            "confidence_score": stage1_gate["calibrated_confidence_pct"],
-            "severity_score": stage1_gate["severity_score"],
-            "escalate_alert_prob": stage1_gate["escalate_alert_prob"],
-            **stage2_reasoning.model_dump(),
-        }
+    nearby_reports = _reports_near_point(lat, lon, radius_km=2.0)
 
-        now_iso = _utc_now_iso()
-        zone["weather"] = weather_snapshot
-        zone["latest_evaluation"] = eval_dict
-        zone["decisions_telemetry"] = stage1_gate
-        zone["routing_info"] = routing_meta
-        zone["last_interaction_id"] = interaction_id
-        zone["review_status"] = "PENDING_REVIEW"
-        zone["approved"] = False
-        zone["evaluated_at"] = now_iso
-
-        return {
-            **eval_dict,
-            "zone_id": zone_id,
-            "review_status": zone["review_status"],
-            "approved": zone["approved"],
-            "evaluated_at": now_iso,
-            "weather": weather_snapshot,
-            "decisions_telemetry": stage1_gate,
-            "routing_info": routing_meta,
-            "interaction_id": interaction_id,
-            "report_count": len(zone["reports"]),
+    async with GLOBAL_LOC_LOCK:
+        existing = DYNAMIC_LOCATIONS.get(spot_key)
+        spot_record: dict[str, Any] = {
+            "id": spot_key,
+            "city": geo["city"],
+            "is_custom_location": True,
+            "is_gps": is_gps,
+            "name": geo["place_name"],
+            "subtitle": geo["subtitle"],
+            "lat": round(lat, 5),
+            "lng": round(lon, 5),
+            "historical_flood_note": hist_note,
+            "nearest_hotspot": {
+                "id": nearest_zone["id"],
+                "name": nearest_zone["name"],
+                "city": nearest_zone["city"],
+                "distance_km": dist_km,
+                "within_hotspot_radius": near_hotspot,
+                "historical_flood_note": nearest_zone["historical_flood_note"],
+            },
+            "metadata": {
+                "elevation_m": elev_m,
+                "drainage_capacity_mm_hr": threshold_mm,
+                "drainage_threshold_mm_per_hr": threshold_mm,
+                "saturation_hours": sat_hours,
+                "impervious_surface_pct": impervious_pct,
+                "canal_basin": basin,
+                "drainage_profile": hist_note,
+            },
+            "reports": nearby_reports,
+            "weather": existing["weather"] if existing else None,
+            "latest_evaluation": existing["latest_evaluation"] if existing else None,
+            "decisions_telemetry": existing["decisions_telemetry"] if existing else None,
+            "routing_info": existing["routing_info"] if existing else None,
+            "last_interaction_id": existing["last_interaction_id"] if existing else None,
+            "review_status": existing["review_status"] if existing else "UNASSESSED",
+            "approved": existing["approved"] if existing else False,
+            "evaluated_at": existing["evaluated_at"] if existing else None,
+            "approved_alert": existing["approved_alert"] if existing else None,
         }
+        DYNAMIC_LOCATIONS[spot_key] = spot_record
+
+        return await _evaluate_target_record(
+            target=spot_record,
+            simulated_rain_mm=simulated_rain_mm,
+            nearest_hotspot_context=hist_note,
+        )
 
 
 # ---------------------------------------------------------------------------
 # FastAPI App & Routes
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="RainReady — Kochi Rainfall Intensity + Duration Flood Engine",
+    title="RainReady — Hyperlocal GPS & Hotspot Flood Intelligence",
     description=(
-        "6-hour Google Maps Platform Weather API forecast + neighborhood drainage threshold "
-        "duration engine powered by Gemini Decision 1 and Gemini 4 Neon."
+        "Live GPS location & flood-hotspot warning engine powered by Google Weather API, "
+        "OpenStreetMap Nominatim, Gemini Decision 1, and Gemini 4 Neon."
     ),
-    version="3.0.0",
+    version="3.1.0",
     lifespan=lifespan,
 )
 
@@ -993,6 +1311,8 @@ async def health_check() -> dict[str, Any]:
             if has_weather_key
             else "Open-Meteo Live 6h Forecast"
         ),
+        "hotspot_count": len(ZONES),
+        "active_reports": len(ALL_REPORTS),
         "gemini_key_configured": has_gemini_key,
         "google_weather_key_configured": has_weather_key,
     }
@@ -1001,6 +1321,20 @@ async def health_check() -> dict[str, Any]:
 @app.get("/api/zones")
 async def list_zones() -> dict[str, Any]:
     return {"zones": list(ZONES.values())}
+
+
+@app.get("/api/reports")
+async def list_reports() -> dict[str, Any]:
+    return {"reports": ALL_REPORTS}
+
+
+@app.get("/api/state")
+async def get_full_state() -> dict[str, Any]:
+    return {
+        "zones": list(ZONES.values()),
+        "dynamic_locations": list(DYNAMIC_LOCATIONS.values()),
+        "reports": ALL_REPORTS,
+    }
 
 
 @app.post("/api/analyze/{zone_id}")
@@ -1014,36 +1348,107 @@ async def analyze_zone(
         if (payload is not None and payload.simulated_rain_mm is not None)
         else simulated_rain_mm
     )
+    if zone_id in DYNAMIC_LOCATIONS:
+        loc = DYNAMIC_LOCATIONS[zone_id]
+        return await _evaluate_custom_location(
+            lat=loc["lat"],
+            lon=loc["lng"],
+            simulated_rain_mm=override_mm,
+            is_gps=bool(loc.get("is_gps")),
+        )
     return await _evaluate_zone(zone_id=zone_id, simulated_rain_mm=override_mm)
+
+
+@app.post("/api/analyze-location")
+async def analyze_location(req: AnalyzeLocationRequest) -> dict[str, Any]:
+    return await _evaluate_custom_location(
+        lat=req.lat,
+        lon=req.lon,
+        simulated_rain_mm=req.simulated_rain_mm,
+        is_gps=req.is_gps,
+    )
 
 
 @app.post("/api/report")
 async def submit_report(report_req: ReportRequest) -> dict[str, Any]:
     zone_id = report_req.zone_id
-    if zone_id not in ZONES:
-        raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
+    lat = report_req.lat
+    lon = report_req.lon
+
+    # Resolve coordinates from explicit {lat, lon}, known zone, or dynamic location
+    if lat is None or lon is None:
+        if zone_id and zone_id in ZONES:
+            lat = ZONES[zone_id]["lat"]
+            lon = ZONES[zone_id]["lng"]
+        elif zone_id and zone_id in DYNAMIC_LOCATIONS:
+            lat = DYNAMIC_LOCATIONS[zone_id]["lat"]
+            lon = DYNAMIC_LOCATIONS[zone_id]["lng"]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either {lat, lon} or a valid zone_id to submit a report.",
+            )
+
+    # Resolve readable place_name
+    if report_req.place_name and report_req.place_name.strip():
+        resolved_place = report_req.place_name.strip()
+    elif zone_id and zone_id in ZONES:
+        resolved_place = ZONES[zone_id]["name"]
+    elif zone_id and zone_id in DYNAMIC_LOCATIONS:
+        resolved_place = DYNAMIC_LOCATIONS[zone_id]["name"]
+    else:
+        geo = await _reverse_geocode(lat, lon)
+        resolved_place = geo["place_name"]
 
     clean_depth = report_req.depth.strip()
     clean_desc = (
         report_req.description.strip()
-        or f"{clean_depth} reported by resident in {ZONES[zone_id]['name']}."
+        or f"{clean_depth} waterlogging reported at {resolved_place}."
     )
 
     report_entry = {
         "id": uuid.uuid4().hex[:8],
         "zone_id": zone_id,
+        "lat": round(float(lat), 5),
+        "lon": round(float(lon), 5),
+        "place_name": resolved_place,
         "depth": clean_depth,
         "description": clean_desc,
         "timestamp": _utc_now_iso(),
     }
-    ZONES[zone_id]["reports"].append(report_entry)
+    ALL_REPORTS.append(report_entry)
 
-    evaluation_result = await _evaluate_zone(
-        zone_id=zone_id,
-        simulated_rain_mm=report_req.simulated_rain_mm,
-    )
+    # Attach to explicit hotspot or any hotspot within 1.5 km
+    matched_hotspot_id: Optional[str] = None
+    if zone_id and zone_id in ZONES:
+        ZONES[zone_id]["reports"].append(report_entry)
+        matched_hotspot_id = zone_id
+    else:
+        nearest_z, dist_km = _find_nearest_hotspot(lat, lon)
+        if dist_km <= 1.5:
+            nearest_z["reports"].append(report_entry)
+            matched_hotspot_id = nearest_z["id"]
+
+    # Immediately re-run live Gemini 4 evaluation for the active context
+    if zone_id and zone_id in ZONES:
+        evaluation_result = await _evaluate_zone(
+            zone_id=zone_id,
+            simulated_rain_mm=report_req.simulated_rain_mm,
+        )
+    else:
+        evaluation_result = await _evaluate_custom_location(
+            lat=float(lat),
+            lon=float(lon),
+            simulated_rain_mm=report_req.simulated_rain_mm,
+            is_gps=bool(zone_id and zone_id in DYNAMIC_LOCATIONS and DYNAMIC_LOCATIONS[zone_id].get("is_gps")),
+        )
+        # If also adjacent to a mapped hotspot, keep its report list fresh
+        if matched_hotspot_id and matched_hotspot_id != evaluation_result.get("zone_id"):
+            ZONES[matched_hotspot_id]["review_status"] = "PENDING_REVIEW"
+
     return {
         "report": report_entry,
+        "reports": ALL_REPORTS,
         "evaluation": evaluation_result,
         **evaluation_result,
     }
@@ -1051,38 +1456,65 @@ async def submit_report(report_req: ReportRequest) -> dict[str, Any]:
 
 @app.post("/api/approve/{zone_id}")
 async def approve_zone_alert(zone_id: str) -> dict[str, Any]:
-    if zone_id not in ZONES:
-        raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
+    if zone_id in ZONES:
+        async with ZONE_LOCKS[zone_id]:
+            zone = ZONES[zone_id]
+            if zone["latest_evaluation"] is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot approve an unassessed zone.",
+                )
+            approved_at = _utc_now_iso()
+            zone["approved"] = True
+            zone["review_status"] = "APPROVED"
+            zone["approved_alert"] = {
+                **copy.deepcopy(zone["latest_evaluation"]),
+                "zone_id": zone_id,
+                "zone_name": zone["name"],
+                "approved_at": approved_at,
+                "evaluated_at": zone["evaluated_at"],
+                "weather": copy.deepcopy(zone["weather"]),
+                "decisions_telemetry": copy.deepcopy(zone["decisions_telemetry"]),
+                "routing_info": copy.deepcopy(zone["routing_info"]),
+                "report_count": len(zone["reports"]),
+            }
+            return {
+                "zone_id": zone_id,
+                "approved": True,
+                "review_status": "APPROVED",
+                "approved_alert": zone["approved_alert"],
+            }
 
-    async with ZONE_LOCKS[zone_id]:
-        zone = ZONES[zone_id]
-        if zone["latest_evaluation"] is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot approve an unassessed zone. Run /api/analyze/{zone_id} first.",
-            )
+    if zone_id in DYNAMIC_LOCATIONS:
+        async with GLOBAL_LOC_LOCK:
+            loc = DYNAMIC_LOCATIONS[zone_id]
+            if loc["latest_evaluation"] is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot approve an unassessed location.",
+                )
+            approved_at = _utc_now_iso()
+            loc["approved"] = True
+            loc["review_status"] = "APPROVED"
+            loc["approved_alert"] = {
+                **copy.deepcopy(loc["latest_evaluation"]),
+                "zone_id": zone_id,
+                "zone_name": loc["name"],
+                "approved_at": approved_at,
+                "evaluated_at": loc["evaluated_at"],
+                "weather": copy.deepcopy(loc["weather"]),
+                "decisions_telemetry": copy.deepcopy(loc["decisions_telemetry"]),
+                "routing_info": copy.deepcopy(loc["routing_info"]),
+                "report_count": len(loc["reports"]),
+            }
+            return {
+                "zone_id": zone_id,
+                "approved": True,
+                "review_status": "APPROVED",
+                "approved_alert": loc["approved_alert"],
+            }
 
-        approved_at = _utc_now_iso()
-        zone["approved"] = True
-        zone["review_status"] = "APPROVED"
-        zone["approved_alert"] = {
-            **copy.deepcopy(zone["latest_evaluation"]),
-            "zone_id": zone_id,
-            "zone_name": zone["name"],
-            "approved_at": approved_at,
-            "evaluated_at": zone["evaluated_at"],
-            "weather": copy.deepcopy(zone["weather"]),
-            "decisions_telemetry": copy.deepcopy(zone["decisions_telemetry"]),
-            "routing_info": copy.deepcopy(zone["routing_info"]),
-            "report_count": len(zone["reports"]),
-        }
-
-        return {
-            "zone_id": zone_id,
-            "approved": True,
-            "review_status": "APPROVED",
-            "approved_alert": zone["approved_alert"],
-        }
+    raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
 
 
 @app.post("/api/reset")
@@ -1091,7 +1523,14 @@ async def reset_demo_state() -> dict[str, Any]:
     fresh = _build_initial_zones()
     for zid, data in fresh.items():
         ZONES[zid] = data
-    return {"status": "reset", "zones": list(ZONES.values())}
+    DYNAMIC_LOCATIONS.clear()
+    ALL_REPORTS.clear()
+    return {
+        "status": "reset",
+        "zones": list(ZONES.values()),
+        "dynamic_locations": [],
+        "reports": [],
+    }
 
 
 if __name__ == "__main__":
