@@ -2,9 +2,14 @@
 .env
 .env.*
 
-# Git & local dev artifacts
+# Agent skills & repo metadata (keep production Cloud Run image minimal)
 .git
 .gitignore
+.agents
+.agent
+skills-lock.json
+
+# Python & IDE artifacts
 __pycache__/
 *.py[cod]
 .venv/

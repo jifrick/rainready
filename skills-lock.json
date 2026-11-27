@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "skills": {
+    "cloud-run-basics": {
+      "source": "google/skills",
+      "commit": "6dc0d53303b9f96f166ac72d7f8f1920cb260f24",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/cloud-run-basics/SKILL.md",
+      "computedHash": "83f13114e493276c91dae5462494c1334f0a2456a049aebd0c5ff0be93898fac",
+      "installMode": "copy"
+    },
+    "finding-google-skills": {
+      "source": "google/skills",
+      "commit": "6dc0d53303b9f96f166ac72d7f8f1920cb260f24",
+      "sourceType": "github",
+      "skillPath": "skills/developers/finding-google-skills/SKILL.md",
+      "computedHash": "e0a5b85fcbe5626a71b07c853e215c109eab2fbe75e2edcefd6e921e62184752",
+      "installMode": "copy"
+    },
+    "gcloud": {
+      "source": "google/skills",
+      "commit": "6dc0d53303b9f96f166ac72d7f8f1920cb260f24",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/gcloud/SKILL.md",
+      "computedHash": "ad29fb77d1e07f1401bfab1c023d016915d09b2b1fd37c2a9d7c92c6d732e55c",
+      "installMode": "copy"
+    },
+    "gemini-api": {
+      "source": "google/skills",
+      "commit": "6dc0d53303b9f96f166ac72d7f8f1920cb260f24",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/gemini-api/SKILL.md",
+      "computedHash": "56789692d566b9fc75b6e8dd09ece8e53f03a74299cd25d6d264ecd5830b0ef3",
+      "installMode": "copy"
+    }
+  }
+}

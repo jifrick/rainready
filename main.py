@@ -3,9 +3,10 @@ import copy
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -285,13 +286,30 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
 ZONES: dict[str, dict[str, Any]] = _build_initial_zones()
 ZONE_LOCKS: dict[str, asyncio.Lock] = {zid: asyncio.Lock() for zid in ZONES}
 
+# Shared connection-pooled HTTP client for Cloud Run concurrency efficiency
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    global _http_client
+    _http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, connect=5.0),
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+    )
+    try:
+        yield
+    finally:
+        await _http_client.aclose()
+        _http_client = None
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _get_gemini_client() -> genai.Client:
-    """Instantiate Google GenAI client strictly using os.environ['GEMINI_API_KEY']."""
+    """Instantiate unified Google GenAI client strictly using os.environ['GEMINI_API_KEY']."""
     load_dotenv(override=True)
     try:
         api_key = os.environ["GEMINI_API_KEY"].strip()
@@ -309,16 +327,21 @@ def _get_gemini_client() -> genai.Client:
 
 
 async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
-    """Fetch live current precipitation and rain from Open-Meteo API."""
+    """Fetch live current precipitation and rain from Open-Meteo API using pooled client."""
     params = {
         "latitude": lat,
         "longitude": lng,
         "current": "precipitation,rain",
     }
-    async with httpx.AsyncClient(timeout=10.0) as http_client:
-        resp = await http_client.get(OPEN_METEO_URL, params=params)
+    if _http_client is not None:
+        resp = await _http_client.get(OPEN_METEO_URL, params=params)
         resp.raise_for_status()
         payload = resp.json()
+    else:
+        async with httpx.AsyncClient(timeout=10.0) as fallback_client:
+            resp = await fallback_client.get(OPEN_METEO_URL, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
 
     current = payload.get("current", {})
     units = payload.get("current_units", {})
@@ -378,13 +401,14 @@ CROWD-SOURCED RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
 Return a strictly structured JSON assessment matching the schema."""
 
 
-def _call_gemini_sync(prompt: str) -> GeminiRiskAssessment:
+async def _call_gemini_async(prompt: str) -> GeminiRiskAssessment:
+    """Invoke Gemini asynchronously via client.aio.models.generate_content per google/skills gemini-api."""
     client = _get_gemini_client()
     last_err: Optional[Exception] = None
 
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -406,15 +430,17 @@ def _call_gemini_sync(prompt: str) -> GeminiRiskAssessment:
         except Exception as exc:
             last_err = exc
             err_str = str(exc)
-            # Retry transient overload/rate-limit errors briefly
-            if attempt < 2 and ("429" in err_str or "503" in err_str or "UNAVAILABLE" in err_str):
-                import time
-
-                time.sleep(1.5 * (attempt + 1))
+            if attempt < 2 and (
+                "429" in err_str
+                or "503" in err_str
+                or "UNAVAILABLE" in err_str
+                or "RESOURCE_EXHAUSTED" in err_str
+            ):
+                await asyncio.sleep(1.5 * (attempt + 1))
                 continue
             break
 
-    logger.exception("Gemini evaluation failed: %s", last_err)
+    logger.exception("Gemini async evaluation failed: %s", last_err)
     raise HTTPException(
         status_code=502,
         detail=f"Live Gemini API call failed: {last_err}",
@@ -464,9 +490,9 @@ async def _evaluate_zone(
             "fetched_at": _utc_now_iso(),
         }
 
-        # 2. Query gemini-2.5-flash via Structured Outputs
+        # 2. Query gemini-2.5-flash asynchronously via Structured Outputs
         prompt = _build_gemini_prompt(zone, weather_snapshot, simulated_rain_mm)
-        assessment = await asyncio.to_thread(_call_gemini_sync, prompt)
+        assessment = await _call_gemini_async(prompt)
         eval_dict = assessment.model_dump()
 
         # 3. Store in PENDING_REVIEW human-in-the-loop gate
@@ -495,6 +521,7 @@ app = FastAPI(
     title="RainReady — Kochi Hyperlocal Flood Alert Engine",
     description="Live Open-Meteo + Gemini 2.5 Flash neighborhood flood risk engine with human-in-the-loop broadcast gate.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -545,7 +572,10 @@ async def submit_report(report_req: ReportRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
 
     clean_depth = report_req.depth.strip()
-    clean_desc = report_req.description.strip() or f"{clean_depth} reported by resident in {ZONES[zone_id]['name']}."
+    clean_desc = (
+        report_req.description.strip()
+        or f"{clean_depth} reported by resident in {ZONES[zone_id]['name']}."
+    )
 
     report_entry = {
         "id": uuid.uuid4().hex[:8],
@@ -614,5 +644,6 @@ async def reset_demo_state() -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
+    # Cloud Run Container Contract: bind 0.0.0.0 on injected $PORT (default 8080)
     port = int(os.environ.get("PORT", "8080"))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
