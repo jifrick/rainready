@@ -264,7 +264,7 @@
             id="mode-resident-btn"
             type="button"
             onclick="setViewMode('resident')"
-            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm"
+            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer bg-white text-slate-950 shadow-sm"
           >
             Resident Map
           </button>
@@ -272,7 +272,7 @@
             id="mode-reviewer-btn"
             type="button"
             onclick="setViewMode('reviewer')"
-            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5"
+            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5"
           >
             <span>City Reviewer</span>
             <span
@@ -340,7 +340,7 @@
   <aside
     id="reviewer-drawer"
     aria-hidden="true"
-    class="fixed z-25 top-[116px] md:top-[76px] bottom-0 md:bottom-5 right-0 md:right-5 w-full md:w-[420px] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition translate-x-full opacity-0 pointer-events-none"
+    class="fixed z-25 top-[120px] md:top-[128px] bottom-0 md:bottom-5 right-0 md:right-5 w-full md:w-[420px] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition translate-x-full opacity-0 pointer-events-none"
   >
     <!-- Drawer Header + Storm Simulator Card -->
     <div class="p-5 border-b border-white/[0.07] space-y-4 shrink-0">
@@ -651,8 +651,8 @@
       const inspector = document.getElementById('resident-inspector');
 
       if (mode === 'reviewer') {
-        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white';
-        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm flex items-center gap-1.5';
+        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer text-slate-300 hover:text-white';
+        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer bg-white text-slate-950 shadow-sm flex items-center gap-1.5';
 
         drawer.classList.remove('translate-x-full', 'opacity-0', 'pointer-events-none');
         drawer.classList.add('translate-x-0', 'opacity-100', 'pointer-events-auto');
@@ -661,8 +661,8 @@
         // On mobile (<768px), hide bottom sheet while City Reviewer drawer is open
         inspector.classList.add('hidden', 'md:flex');
       } else {
-        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm';
-        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5';
+        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer bg-white text-slate-950 shadow-sm';
+        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight whitespace-nowrap spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5';
 
         drawer.classList.add('translate-x-full', 'opacity-0', 'pointer-events-none');
         drawer.classList.remove('translate-x-0', 'opacity-100', 'pointer-events-auto');
@@ -1198,7 +1198,7 @@
       const riskKey = displayEval ? displayEval.risk_level : 'UNASSESSED';
       const theme = STATUS_THEME[riskKey] || STATUS_THEME.UNASSESSED;
 
-      inspectorShell.className = `fixed z-20 left-0 right-0 bottom-0 md:left-5 md:right-auto md:bottom-5 w-full md:w-[432px] md:max-w-[440px] max-h-[62vh] md:max-h-[calc(100vh-136px)] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition ${
+      inspectorShell.className = `fixed z-20 left-0 right-0 bottom-0 md:left-5 md:right-auto md:top-[128px] md:bottom-5 w-full md:w-[432px] md:max-w-[440px] max-h-[60vh] md:max-h-none glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition ${
         state.viewMode === 'reviewer' ? 'hidden md:flex' : 'flex'
       } ${theme.glowClass}`;
 
