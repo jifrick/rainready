@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RainReady · Kochi Hyperlocal Flood Alert Engine</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+        }
+      }
+    };
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet.js CSS & JS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <style>
+    body {
+      background-color: #060b14;
+      color: #e2e8f0;
+    }
+    .leaflet-container {
+      background: #0b1220 !important;
+      font-family: 'Inter', sans-serif;
+    }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: #0f172a !important;
+      color: #f1f5f9 !important;
+      border: 1px solid #334155;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+    }
+    /* Custom thin dark scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090f1c;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Top Command Bar -->
+  <header class="sticky top-0 z-40 border-b border-slate-800/90 bg-slate-950/90 backdrop-blur-md">
+    <div class="max-w-[1680px] mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15zm5 4v2m4-2v2m4-2v2" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white">RainReady</h1>
+            <span class="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/25">
+              Kochi Metro Resilience
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">
+            Hyperlocal Flood Intelligence · Open-Meteo Telemetry + Live <span class="font-mono text-slate-300">gemini-2.5-flash</span> Structured Risk Engine
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <div id="engine-pill" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs">
+          <span id="engine-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span id="engine-text" class="font-mono text-slate-300">Checking Gemini Engine...</span>
+        </div>
+        <span class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] font-mono text-slate-400">
+          Cloud Run: <strong class="text-slate-200 font-medium">geminisprints26blr-3834</strong>
+        </span>
+        <button
+          id="reset-demo-btn"
+          type="button"
+          title="Clear reports and reset evaluations for a fresh demo run"
+          class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-slate-300 transition cursor-pointer"
+        >
+          Reset Demo
+        </button>
+      </div>
+    </div>
+
+    <!-- Global API / Error Banner -->
+    <div id="error-banner" class="hidden bg-rose-950/90 border-t border-rose-500/40 px-4 sm:px-6 py-2.5 text-xs text-rose-200">
+      <div class="max-w-[1680px] mx-auto flex items-center justify-between gap-4">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-rose-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
+          </svg>
+          <span id="error-banner-msg"></span>
+        </div>
+        <button onclick="hideError()" class="text-rose-300 hover:text-white font-mono text-[11px] underline cursor-pointer">Dismiss</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Split-Screen Main Workspace -->
+  <main class="flex-1 max-w-[1680px] w-full mx-auto px-4 sm:px-6 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- =================================================================== -->
+    <!-- LEFT PANEL: RESIDENT VIEW (7 columns on desktop)                    -->
+    <!-- =================================================================== -->
+    <section class="lg:col-span-7 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold tracking-wide uppercase">
+            Public Resident View
+          </span>
+          <span class="text-xs text-slate-400">Verified neighborhood alerts &amp; 1-tap citizen reporting</span>
+        </div>
+        <span id="selected-zone-pill" class="text-xs font-mono text-cyan-300 bg-cyan-950/50 border border-cyan-800/50 px-2.5 py-1 rounded-md">
+          Zone: —
+        </span>
+      </div>
+
+      <!-- Active Approved Alerts Banner + Expandable "Why am I seeing this?" Drawer -->
+      <div id="approved-alerts-container" class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl transition-all">
+        <!-- Populated dynamically from live state -->
+      </div>
+
+      <!-- Zone Quick-Selector Pills -->
+      <div id="zone-tabs" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Interactive Leaflet Map Card -->
+      <div class="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 shadow-xl">
+        <div id="kochi-map" class="w-full h-[380px] sm:h-[420px] z-10"></div>
+
+        <!-- Map Overlay: Legend -->
+        <div class="absolute bottom-3 left-3 z-20 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl px-3 py-2 text-[11px] shadow-lg">
+          <div class="font-semibold text-slate-300 mb-1.5">Flood Risk Polygons</div>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="flex items-center gap-1.5 text-slate-300">
+              <span class="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span> LOW
+            </span>
+            <span class="flex items-center gap-1.5 text-slate-300">
+              <span class="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block"></span> WATCH
+            </span>
+            <span class="flex items-center gap-1.5 text-slate-300">
+              <span class="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block"></span> HIGH
+            </span>
+            <span class="flex items-center gap-1.5 text-slate-400">
+              <span class="w-2.5 h-2.5 rounded-sm border border-dashed border-slate-400 bg-slate-700/60 inline-block"></span> Unassessed / Pending
+            </span>
+          </div>
+        </div>
+
+        <!-- Map Overlay: Live Gemini Evaluation Spinner -->
+        <div id="map-loading-overlay" class="hidden absolute top-3 right-3 z-20 bg-slate-950/90 backdrop-blur-md border border-cyan-500/40 rounded-xl px-3 py-2 text-xs text-cyan-200 flex items-center gap-2 shadow-lg">
+          <svg class="w-4 h-4 animate-spin text-cyan-400" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          <span id="map-loading-text">Querying Open-Meteo &amp; Gemini 2.5 Flash...</span>
+        </div>
+      </div>
+
+      <!-- 1-Tap Report Waterlogging Form -->
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              1-Tap Report Waterlogging
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Tap a condition below to submit a live ground report for <strong id="report-zone-label" class="text-cyan-300">—</strong> and immediately re-run Gemini risk analysis.
+            </p>
+          </div>
+          <span id="report-count-badge" class="text-[11px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+            0 reports in zone
+          </span>
+        </div>
+
+        <div class="mb-3">
+          <input
+            id="report-description"
+            type="text"
+            maxlength="280"
+            placeholder="Optional landmark/street note (e.g., Water rising near underpass entry / bus stop grate clogged)..."
+            class="w-full rounded-xl bg-slate-950/90 border border-slate-800 focus:border-cyan-500/60 focus:outline-none px-3.5 py-2 text-xs text-slate-200 placeholder-slate-500"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <button
+            type="button"
+            data-depth="Ankle-Deep"
+            onclick="submitResidentReport('Ankle-Deep')"
+            class="report-btn group flex items-center justify-between gap-2 p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-400/60 text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div>
+              <div class="text-xs font-semibold text-amber-200 group-hover:text-amber-100">Ankle-Deep</div>
+              <div class="text-[11px] text-amber-300/70">~15cm · Curb &amp; lane ponding</div>
+            </div>
+            <span class="text-amber-300 text-sm font-mono">+1</span>
+          </button>
+
+          <button
+            type="button"
+            data-depth="Knee-Deep"
+            onclick="submitResidentReport('Knee-Deep')"
+            class="report-btn group flex items-center justify-between gap-2 p-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-400/60 text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div>
+              <div class="text-xs font-semibold text-rose-200 group-hover:text-rose-100">Knee-Deep</div>
+              <div class="text-[11px] text-rose-300/70">~45cm · Stall hazard for vehicles</div>
+            </div>
+            <span class="text-rose-300 text-sm font-mono">+1</span>
+          </button>
+
+          <button
+            type="button"
+            data-depth="Blocked Drain"
+            onclick="submitResidentReport('Blocked Drain')"
+            class="report-btn group flex items-center justify-between gap-2 p-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 hover:border-cyan-400/60 text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div>
+              <div class="text-xs font-semibold text-cyan-200 group-hover:text-cyan-100">Blocked Drain</div>
+              <div class="text-[11px] text-cyan-300/70">Silt/plastic choking culvert</div>
+            </div>
+            <span class="text-cyan-300 text-sm font-mono">+1</span>
+          </button>
+        </div>
+
+        <!-- Recent Ground Reports List -->
+        <div id="recent-reports-list" class="mt-3 pt-3 border-t border-slate-800/80 hidden">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- RIGHT PANEL: RESPONDER & DEMO VIEW (5 columns on desktop)           -->
+    <!-- =================================================================== -->
+    <aside class="lg:col-span-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold tracking-wide uppercase">
+            Responder &amp; Demo Console
+          </span>
+          <span class="text-xs text-slate-400">Human-in-the-Loop Gate</span>
+        </div>
+        <button
+          id="reanalyze-btn"
+          type="button"
+          onclick="analyzeSelectedZone()"
+          class="px-3 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-xs font-medium text-cyan-200 transition cursor-pointer disabled:opacity-50"
+        >
+          ↻ Re-Run Live Gemini
+        </button>
+      </div>
+
+      <!-- Simulate Cloudburst (45mm/hr) Toggle Card -->
+      <div id="cloudburst-card" class="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 shadow-xl transition-all">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-white">Simulate Cloudburst (45mm/hr)</span>
+              <span id="sim-badge" class="hidden text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                Active Override
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Injects a severe 45.0 mm/hr monsoon cloudburst into <span class="font-mono text-slate-300">/api/analyze/{zone_id}</span> and triggers live Gemini 2.5 Flash re-evaluation.
+            </p>
+          </div>
+
+          <!-- Toggle Switch -->
+          <button
+            id="cloudburst-toggle"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            onclick="toggleCloudburst()"
+            class="relative inline-flex h-7 w-13 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors duration-200 ease-in-out focus:outline-none"
+            style="width: 52px;"
+          >
+            <span
+              id="cloudburst-knob"
+              class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0"
+            ></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Selected Zone Live Telemetry & Terrain Snapshot -->
+      <div id="telemetry-card" class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Human Reviewer Queue (Pending Review + Broadcast Gate) -->
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl flex-1 flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-white">Human Reviewer Queue</h2>
+            <p class="text-xs text-slate-400">
+              AI assessments enter <span class="font-mono text-amber-300">PENDING_REVIEW</span> first. Approve to publish to the Resident View.
+            </p>
+          </div>
+          <span id="pending-count-badge" class="text-[11px] font-mono px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            0 Pending
+          </span>
+        </div>
+
+        <div id="reviewer-queue-list" class="space-y-3 flex-1">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <script>
+    // =========================================================================
+    // Application State (Zero hardcoded AI evaluations — 100% backend-driven)
+    // =========================================================================
+    const state = {
+      zones: {},
+      zoneOrder: [],
+      selectedZoneId: null,
+      simulateCloudburst: false,
+      loadingZoneId: null,
+      expandedSignalZones: {},
+    };
+
+    let map = null;
+    const polygonLayers = {};
+
+    const RISK_STYLES = {
+      LOW: {
+        color: '#10b981',
+        fillColor: '#10b981',
+        badgeBg: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35',
+        bannerBorder: 'border-emerald-500/40 bg-emerald-950/25',
+        label: 'LOW RISK',
+      },
+      WATCH: {
+        color: '#f59e0b',
+        fillColor: '#f59e0b',
+        badgeBg: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+        bannerBorder: 'border-amber-500/45 bg-amber-950/25',
+        label: 'FLOOD WATCH',
+      },
+      HIGH: {
+        color: '#ef4444',
+        fillColor: '#ef4444',
+        badgeBg: 'bg-rose-500/20 text-rose-200 border-rose-500/50',
+        bannerBorder: 'border-rose-500/55 bg-rose-950/30',
+        label: 'HIGH FLOOD RISK',
+      },
+      UNASSESSED: {
+        color: '#64748b',
+        fillColor: '#475569',
+        badgeBg: 'bg-slate-800 text-slate-300 border-slate-700',
+        bannerBorder: 'border-slate-800 bg-slate-900/75',
+        label: 'UNASSESSED',
+      },
+    };
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatTime(isoStr) {
+      if (!isoStr) return '—';
+      try {
+        return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch {
+        return isoStr;
+      }
+    }
+
+    function showError(msg) {
+      const banner = document.getElementById('error-banner');
+      document.getElementById('error-banner-msg').textContent = msg;
+      banner.classList.remove('hidden');
+    }
+
+    function hideError() {
+      document.getElementById('error-banner').classList.add('hidden');
+    }
+
+    function setLoading(zoneId, label) {
+      state.loadingZoneId = zoneId;
+      const overlay = document.getElementById('map-loading-overlay');
+      const textEl = document.getElementById('map-loading-text');
+      const reanalyzeBtn = document.getElementById('reanalyze-btn');
+      const reportBtns = document.querySelectorAll('.report-btn');
+
+      if (zoneId) {
+        textEl.textContent = label || 'Querying Open-Meteo & Gemini 2.5 Flash...';
+        overlay.classList.remove('hidden');
+        reanalyzeBtn.disabled = true;
+        reportBtns.forEach(b => (b.disabled = true));
+      } else {
+        overlay.classList.add('hidden');
+        reanalyzeBtn.disabled = false;
+        reportBtns.forEach(b => (b.disabled = false));
+      }
+    }
+
+    // =========================================================================
+    // Map Initialization & Polygon Rendering
+    // =========================================================================
+    function initMap() {
+      map = L.map('kochi-map', {
+        center: [9.985, 76.295],
+        zoom: 13,
+        zoomControl: true,
+      });
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19,
+      }).addTo(map);
+    }
+
+    function getPolygonStyle(zone, isSelected) {
+      // Color reflects latest Gemini evaluation (Green=LOW, Yellow=WATCH, Red=HIGH)
+      const evalObj = zone.latest_evaluation || zone.approved_alert;
+      const riskKey = evalObj ? evalObj.risk_level : 'UNASSESSED';
+      const theme = RISK_STYLES[riskKey] || RISK_STYLES.UNASSESSED;
+      const isApproved = Boolean(zone.approved);
+
+      return {
+        color: isSelected ? '#38bdf8' : theme.color,
+        weight: isSelected ? 3 : 2,
+        opacity: 0.95,
+        dashArray: isApproved ? null : '6, 5',
+        fillColor: theme.fillColor,
+        fillOpacity: evalObj ? (isSelected ? 0.42 : 0.28) : (isSelected ? 0.25 : 0.14),
+      };
+    }
+
+    function syncMapPolygons(fitInitialBounds = false) {
+      const groupBounds = [];
+
+      for (const zoneId of state.zoneOrder) {
+        const zone = state.zones[zoneId];
+        const isSelected = zoneId === state.selectedZoneId;
+        const style = getPolygonStyle(zone, isSelected);
+
+        if (!polygonLayers[zoneId]) {
+          const geoLayer = L.geoJSON(zone.polygon, {
+            style: () => style,
+            onEachFeature: (_, layer) => {
+              layer.on('click', () => selectZone(zoneId, true));
+            },
+          }).addTo(map);
+          polygonLayers[zoneId] = geoLayer;
+        } else {
+          polygonLayers[zoneId].setStyle(style);
+        }
+
+        const evalObj = zone.latest_evaluation;
+        const statusText = evalObj
+          ? `${evalObj.risk_level} (${evalObj.confidence_score}% conf) · ${zone.review_status}`
+          : 'Click to run live Gemini 2.5 Flash analysis';
+
+        polygonLayers[zoneId].bindTooltip(
+          `<div class="text-xs font-sans"><strong>${escapeHtml(zone.name)}</strong><br/>${escapeHtml(statusText)}</div>`,
+          { sticky: true, direction: 'top' }
+        );
+
+        groupBounds.push(polygonLayers[zoneId].getBounds());
+      }
+
+      if (fitInitialBounds && groupBounds.length > 0) {
+        let combined = groupBounds[0];
+        for (let i = 1; i < groupBounds.length; i++) {
+          combined = combined.extend(groupBounds[i]);
+        }
+        map.fitBounds(combined.pad(0.14));
+      }
+    }
+
+    // =========================================================================
+    // Backend API Calls
+    // =========================================================================
+    async function checkEngineHealth() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        const dot = document.getElementById('engine-dot');
+        const txt = document.getElementById('engine-text');
+        if (data.gemini_key_configured) {
+          dot.className = 'w-2 h-2 rounded-full bg-emerald-400 shadow shadow-emerald-400/60';
+          txt.textContent = `${data.model} · Live Ready`;
+        } else {
+          dot.className = 'w-2 h-2 rounded-full bg-rose-400 animate-pulse';
+          txt.textContent = 'GEMINI_API_KEY Missing (.env)';
+          showError('GEMINI_API_KEY is not configured in .env yet. Add GEMINI_API_KEY=... to .env in the workspace to enable live Gemini evaluations.');
+        }
+      } catch (err) {
+        console.error('Health check failed:', err);
+      }
+    }
+
+    async function loadZones(fitMap = false) {
+      const res = await fetch('/api/zones');
+      if (!res.ok) throw new Error('Failed to load Kochi zones');
+      const data = await res.json();
+
+      state.zoneOrder = data.zones.map(z => z.id);
+      data.zones.forEach(z => {
+        state.zones[z.id] = z;
+      });
+
+      if (!state.selectedZoneId && state.zoneOrder.length > 0) {
+        state.selectedZoneId = state.zoneOrder[0];
+      }
+
+      syncMapPolygons(fitMap);
+      renderAll();
+    }
+
+    async function selectZone(zoneId, triggerAnalyzeIfNeeded = true) {
+      const changed = state.selectedZoneId !== zoneId;
+      state.selectedZoneId = zoneId;
+      const zone = state.zones[zoneId];
+
+      if (zone && polygonLayers[zoneId] && changed) {
+        map.flyToBounds(polygonLayers[zoneId].getBounds().pad(0.45), { duration: 0.6 });
+      }
+
+      syncMapPolygons(false);
+      renderAll();
+
+      // Automatically run live Gemini evaluation when clicking a zone that hasn't been evaluated yet
+      // or whose active simulation mode differs from its last evaluation
+      if (triggerAnalyzeIfNeeded && zone && !state.loadingZoneId) {
+        const lastWasSim = Boolean(zone.weather && zone.weather.is_simulated);
+        if (!zone.latest_evaluation || lastWasSim !== state.simulateCloudburst) {
+          await analyzeZone(zoneId);
+        }
+      }
+    }
+
+    async function analyzeSelectedZone() {
+      if (!state.selectedZoneId || state.loadingZoneId) return;
+      await analyzeZone(state.selectedZoneId);
+    }
+
+    async function analyzeZone(zoneId) {
+      const zone = state.zones[zoneId];
+      if (!zone) return;
+
+      hideError();
+      setLoading(
+        zoneId,
+        state.simulateCloudburst
+          ? `Simulating 45mm/hr Cloudburst on ${zone.name} via Gemini 2.5 Flash...`
+          : `Analyzing ${zone.name} with Open-Meteo + Gemini 2.5 Flash...`
+      );
+
+      try {
+        const bodyPayload = {
+          simulated_rain_mm: state.simulateCloudburst ? 45.0 : null,
+        };
+        const res = await fetch(`/api/analyze/${encodeURIComponent(zoneId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        });
+
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.detail || `Analyze request failed (${res.status})`);
+        }
+
+        await loadZones(false);
+      } catch (err) {
+        showError(err.message || 'Live Gemini risk analysis failed.');
+      } finally {
+        setLoading(null);
+      }
+    }
+
+    async function submitResidentReport(depthType) {
+      const zoneId = state.selectedZoneId;
+      if (!zoneId || state.loadingZoneId) return;
+
+      const descInput = document.getElementById('report-description');
+      const customNote = descInput.value.trim();
+      const zoneName = state.zones[zoneId]?.name || zoneId;
+
+      hideError();
+      setLoading(zoneId, `Submitting "${depthType}" report & re-running Gemini 2.5 Flash for ${zoneName}...`);
+
+      try {
+        const res = await fetch('/api/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            zone_id: zoneId,
+            depth: depthType,
+            description: customNote,
+            simulated_rain_mm: state.simulateCloudburst ? 45.0 : null,
+          }),
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.detail || `Report submission failed (${res.status})`);
+        }
+
+        descInput.value = '';
+        await loadZones(false);
+      } catch (err) {
+        showError(err.message || 'Failed to submit resident report.');
+      } finally {
+        setLoading(null);
+      }
+    }
+
+    async function approveZoneAlert(zoneId) {
+      if (state.loadingZoneId) return;
+      hideError();
+
+      try {
+        const res = await fetch(`/api/approve/${encodeURIComponent(zoneId)}`, {
+          method: 'POST',
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.detail || `Approval failed (${res.status})`);
+        }
+        state.expandedSignalZones[zoneId] = true;
+        await loadZones(false);
+      } catch (err) {
+        showError(err.message || 'Failed to approve and broadcast alert.');
+      }
+    }
+
+    async function toggleCloudburst() {
+      if (state.loadingZoneId) return;
+      state.simulateCloudburst = !state.simulateCloudburst;
+      renderCloudburstToggle();
+
+      if (state.selectedZoneId) {
+        await analyzeZone(state.selectedZoneId);
+      }
+    }
+
+    function toggleSignalDrawer(zoneId) {
+      state.expandedSignalZones[zoneId] = !state.expandedSignalZones[zoneId];
+      renderApprovedAlertsBanner();
+    }
+
+    document.getElementById('reset-demo-btn').addEventListener('click', async () => {
+      if (state.loadingZoneId) return;
+      hideError();
+      state.simulateCloudburst = false;
+      state.expandedSignalZones = {};
+      renderCloudburstToggle();
+      await fetch('/api/reset', { method: 'POST' });
+      await loadZones(true);
+    });
+
+    // =========================================================================
+    // UI Renderers
+    // =========================================================================
+    function renderCloudburstToggle() {
+      const btn = document.getElementById('cloudburst-toggle');
+      const knob = document.getElementById('cloudburst-knob');
+      const badge = document.getElementById('sim-badge');
+      const card = document.getElementById('cloudburst-card');
+
+      btn.setAttribute('aria-checked', String(state.simulateCloudburst));
+      if (state.simulateCloudburst) {
+        btn.classList.remove('bg-slate-700');
+        btn.classList.add('bg-rose-500');
+        knob.classList.remove('translate-x-0');
+        knob.classList.add('translate-x-6');
+        badge.classList.remove('hidden');
+        card.className = 'rounded-2xl border border-rose-500/50 bg-rose-950/20 p-4 shadow-xl transition-all';
+      } else {
+        btn.classList.add('bg-slate-700');
+        btn.classList.remove('bg-rose-500');
+        knob.classList.add('translate-x-0');
+        knob.classList.remove('translate-x-6');
+        badge.classList.add('hidden');
+        card.className = 'rounded-2xl border border-slate-800 bg-slate-900/85 p-4 shadow-xl transition-all';
+      }
+    }
+
+    function renderZoneTabs() {
+      const container = document.getElementById('zone-tabs');
+      container.innerHTML = state.zoneOrder
+        .map(zid => {
+          const z = state.zones[zid];
+          const isSelected = zid === state.selectedZoneId;
+          const evalObj = z.latest_evaluation;
+          const riskKey = evalObj ? evalObj.risk_level : 'UNASSESSED';
+          const dotColor =
+            riskKey === 'HIGH'
+              ? 'bg-rose-500'
+              : riskKey === 'WATCH'
+              ? 'bg-amber-400'
+              : riskKey === 'LOW'
+              ? 'bg-emerald-400'
+              : 'bg-slate-500';
+
+          return `
+            <button
+              type="button"
+              onclick="selectZone('${zid}', true)"
+              class="flex flex-col justify-between p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                isSelected
+                  ? 'bg-cyan-950/40 border-cyan-500/60 shadow-md shadow-cyan-950/30'
+                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+              }"
+            >
+              <div class="flex items-center justify-between gap-1.5 w-full">
+                <span class="text-xs font-semibold text-slate-100 truncate">${escapeHtml(z.name)}</span>
+                <span class="w-2 h-2 rounded-full shrink-0 ${dotColor}"></span>
+              </div>
+              <div class="mt-1.5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>${evalObj ? riskKey : 'Click to assess'}</span>
+                <span>${z.approved ? '✓ Broadcast' : z.review_status === 'PENDING_REVIEW' ? '⏳ Pending' : ''}</span>
+              </div>
+            </button>
+          `;
+        })
+        .join('');
+    }
+
+    function renderApprovedAlertsBanner() {
+      const container = document.getElementById('approved-alerts-container');
+      const approvedZones = state.zoneOrder
+        .map(zid => state.zones[zid])
+        .filter(z => z.approved_alert !== null);
+
+      if (approvedZones.length === 0) {
+        const currentZone = state.zones[state.selectedZoneId];
+        const hasPending = currentZone && currentZone.review_status === 'PENDING_REVIEW';
+        container.className = 'rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-xl';
+        container.innerHTML = `
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold text-slate-200">No Active Responder-Approved Broadcasts Yet</div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  ${
+                    hasPending
+                      ? `Gemini 2.5 Flash has generated a live <strong class="text-amber-300">${escapeHtml(currentZone.latest_evaluation.risk_level)}</strong> assessment for <strong>${escapeHtml(currentZone.name)}</strong>. Click <strong>Approve &amp; Broadcast</strong> in the Responder Queue to publish it here.`
+                      : 'Select any Kochi zone on the map to run a live Gemini 2.5 Flash assessment, then approve it in the Responder Queue to broadcast verified guidance.'
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // Prioritize selected zone's approved alert at top, followed by any other approved alerts
+      const sortedApproved = [...approvedZones].sort((a, b) => {
+        if (a.id === state.selectedZoneId) return -1;
+        if (b.id === state.selectedZoneId) return 1;
+        return 0;
+      });
+
+      const primary = sortedApproved[0];
+      const primaryTheme = RISK_STYLES[primary.approved_alert.risk_level] || RISK_STYLES.LOW;
+      container.className = `rounded-2xl border p-4 shadow-xl space-y-3 ${primaryTheme.bannerBorder}`;
+
+      container.innerHTML = sortedApproved
+        .map(zone => {
+          const alert = zone.approved_alert;
+          const theme = RISK_STYLES[alert.risk_level] || RISK_STYLES.LOW;
+          const isOpen = Boolean(state.expandedSignalZones[zone.id]);
+          const hasNewerPending = zone.review_status === 'PENDING_REVIEW';
+
+          return `
+            <div class="rounded-xl bg-slate-950/65 border border-slate-800/90 p-3.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${theme.badgeBg}">
+                    ${escapeHtml(theme.label)}
+                  </span>
+                  <h3 class="text-sm font-bold text-white">${escapeHtml(zone.name)}</h3>
+                  <span class="text-[11px] font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded">
+                    ✓ Responder Verified · ${formatTime(alert.approved_at)}
+                  </span>
+                  ${
+                    hasNewerPending
+                      ? `<span class="text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">Update Pending Review</span>`
+                      : ''
+                  }
+                </div>
+                <span class="text-xs font-mono text-slate-400">
+                  AI Confidence: <strong class="text-slate-200">${alert.confidence_score}%</strong>
+                </span>
+              </div>
+
+              <!-- Plain-Language Resident Next Steps -->
+              <div class="mt-3">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Recommended Next Steps for Residents &amp; Commuters
+                </div>
+                <ul class="space-y-1.5">
+                  ${(alert.resident_actions || [])
+                    .map(
+                      step => `
+                    <li class="flex items-start gap-2 text-xs text-slate-100">
+                      <span class="text-cyan-400 font-bold mt-0.5">→</span>
+                      <span>${escapeHtml(step)}</span>
+                    </li>
+                  `
+                    )
+                    .join('')}
+                </ul>
+              </div>
+
+              <!-- Expandable "Why am I seeing this?" Signal Breakdown Drawer -->
+              <div class="mt-3 pt-2.5 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onclick="toggleSignalDrawer('${zone.id}')"
+                  class="flex items-center justify-between w-full text-left text-xs font-medium text-cyan-300 hover:text-cyan-200 cursor-pointer"
+                >
+                  <span>Why am I seeing this? (${(alert.visible_signals || []).length} verified risk signals)</span>
+                  <span class="font-mono text-[11px]">${isOpen ? '▲ Hide signals' : '▼ Show breakdown'}</span>
+                </button>
+
+                ${
+                  isOpen
+                    ? `
+                  <div class="mt-2.5 rounded-lg bg-slate-900/90 border border-slate-800 p-3 space-y-2">
+                    <div class="flex flex-wrap gap-3 text-[11px] font-mono text-slate-400">
+                      <span>Effective Rain: <strong class="text-slate-200">${
+                        alert.weather ? alert.weather.effective_rain_mm.toFixed(1) + ' mm/hr' : '—'
+                      }</strong></span>
+                      <span>Elevation: <strong class="text-slate-200">${zone.metadata.elevation_m}m MSL</strong></span>
+                      <span>Citizen Reports: <strong class="text-slate-200">${alert.report_count ?? 0}</strong></span>
+                    </div>
+                    <ul class="space-y-1 text-xs text-slate-300 list-disc list-inside">
+                      ${(alert.visible_signals || [])
+                        .map(sig => `<li>${escapeHtml(sig)}</li>`)
+                        .join('')}
+                    </ul>
+                  </div>
+                `
+                    : ''
+                }
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+
+    function renderResidentReportingSection() {
+      const zone = state.zones[state.selectedZoneId];
+      if (!zone) return;
+
+      document.getElementById('selected-zone-pill').textContent = `Zone: ${zone.name}`;
+      document.getElementById('report-zone-label').textContent = zone.name;
+      document.getElementById('report-count-badge').textContent = `${zone.reports.length} report${
+        zone.reports.length === 1 ? '' : 's'
+      } in zone`;
+
+      const listEl = document.getElementById('recent-reports-list');
+      if (zone.reports.length === 0) {
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+      }
+
+      listEl.classList.remove('hidden');
+      const recent = [...zone.reports].slice(-4).reverse();
+      listEl.innerHTML = `
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          Latest Citizen Ground Reports (${escapeHtml(zone.name)})
+        </div>
+        <div class="space-y-1.5">
+          ${recent
+            .map(
+              r => `
+            <div class="flex items-center justify-between gap-2 text-xs bg-slate-950/70 border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+              <div class="truncate">
+                <span class="font-semibold text-cyan-300">${escapeHtml(r.depth)}</span>
+                <span class="text-slate-400 mx-1">·</span>
+                <span class="text-slate-300">${escapeHtml(r.description)}</span>
+              </div>
+              <span class="text-[10px] font-mono text-slate-500 shrink-0">${formatTime(r.timestamp)}</span>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `;
+    }
+
+    function renderTelemetryCard() {
+      const zone = state.zones[state.selectedZoneId];
+      const container = document.getElementById('telemetry-card');
+      if (!zone) return;
+
+      const w = zone.weather;
+      const liveRain = w ? `${w.observed_precipitation_mm.toFixed(1)} mm` : 'Awaiting fetch';
+      const effectiveRain = w
+        ? `${w.effective_rain_mm.toFixed(1)} mm/hr ${w.is_simulated ? '(Simulated)' : '(Live)'}`
+        : state.simulateCloudburst
+        ? '45.0 mm/hr (Pending)'
+        : '—';
+
+      container.innerHTML = `
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white">${escapeHtml(zone.name)}</h3>
+            <p class="text-xs text-slate-400">${escapeHtml(zone.subtitle)}</p>
+          </div>
+          <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+            ${zone.lat.toFixed(4)}°N, ${zone.lng.toFixed(4)}°E
+          </span>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <div class="rounded-xl bg-slate-950/80 border border-slate-800 p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">Open-Meteo Live</div>
+            <div class="text-sm font-mono font-semibold text-cyan-300 mt-0.5">${escapeHtml(liveRain)}</div>
+          </div>
+          <div class="rounded-xl bg-slate-950/80 border border-slate-800 p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">Active Input</div>
+            <div class="text-sm font-mono font-semibold ${
+              w && w.is_simulated ? 'text-rose-300' : 'text-slate-100'
+            } mt-0.5">${escapeHtml(effectiveRain)}</div>
+          </div>
+          <div class="rounded-xl bg-slate-950/80 border border-slate-800 p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">Elevation / Drain</div>
+            <div class="text-sm font-mono font-semibold text-slate-100 mt-0.5">${zone.metadata.elevation_m}m · ${zone.metadata.drainage_capacity_mm_hr}mm/h</div>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-400 leading-relaxed bg-slate-950/50 border border-slate-800/70 rounded-xl p-2.5">
+          <strong class="text-slate-300">Drainage Terrain:</strong> ${escapeHtml(zone.metadata.drainage_profile)}
+        </p>
+      `;
+    }
+
+    function renderReviewerQueue() {
+      const listEl = document.getElementById('reviewer-queue-list');
+      const badgeEl = document.getElementById('pending-count-badge');
+
+      const allZones = state.zoneOrder.map(zid => state.zones[zid]);
+      const pendingCount = allZones.filter(z => z.review_status === 'PENDING_REVIEW').length;
+      badgeEl.textContent = `${pendingCount} Pending`;
+
+      // Show evaluated zones, prioritizing selected zone & PENDING_REVIEW items
+      const evaluatedZones = allZones
+        .filter(z => z.latest_evaluation !== null)
+        .sort((a, b) => {
+          if (a.id === state.selectedZoneId) return -1;
+          if (b.id === state.selectedZoneId) return 1;
+          if (a.review_status === 'PENDING_REVIEW' && b.review_status !== 'PENDING_REVIEW') return -1;
+          if (b.review_status === 'PENDING_REVIEW' && a.review_status !== 'PENDING_REVIEW') return 1;
+          return 0;
+        });
+
+      if (evaluatedZones.length === 0) {
+        listEl.innerHTML = `
+          <div class="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center">
+            <p class="text-xs text-slate-400">
+              No AI evaluations in the queue yet. Click any zone on the map or click <strong>↻ Re-Run Live Gemini</strong> to generate a live risk assessment.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = evaluatedZones
+        .map(zone => {
+          const ev = zone.latest_evaluation;
+          const theme = RISK_STYLES[ev.risk_level] || RISK_STYLES.LOW;
+          const isPending = zone.review_status === 'PENDING_REVIEW';
+          const isSelected = zone.id === state.selectedZoneId;
+          const barColor =
+            ev.risk_level === 'HIGH'
+              ? 'bg-rose-500'
+              : ev.risk_level === 'WATCH'
+              ? 'bg-amber-400'
+              : 'bg-emerald-500';
+
+          return `
+            <div class="rounded-xl border ${
+              isSelected ? 'border-cyan-500/50 bg-slate-950/90' : 'border-slate-800 bg-slate-950/60'
+            } p-3.5 transition">
+              <!-- Header Row -->
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onclick="selectZone('${zone.id}', false)"
+                    class="text-sm font-bold text-white hover:text-cyan-300 transition cursor-pointer text-left"
+                  >
+                    ${escapeHtml(zone.name)}
+                  </button>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${theme.badgeBg}">
+                    ${escapeHtml(ev.risk_level)}
+                  </span>
+                </div>
+
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded border ${
+                  isPending
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                }">
+                  ${isPending ? 'PENDING_REVIEW' : 'APPROVED'}
+                </span>
+              </div>
+
+              <!-- Confidence Meter -->
+              <div class="mt-2.5">
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="text-slate-400">Gemini Confidence Score</span>
+                  <span class="font-mono font-bold text-white">${ev.confidence_score}%</span>
+                </div>
+                <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                  <div class="h-full ${barColor} transition-all duration-500" style="width: ${Math.min(
+            100,
+            Math.max(0, ev.confidence_score)
+          )}%"></div>
+                </div>
+              </div>
+
+              <!-- Responder Summary -->
+              <div class="mt-3 text-xs text-slate-200 leading-relaxed bg-slate-900/90 border border-slate-800/90 rounded-lg p-2.5">
+                <div class="text-[10px] font-mono uppercase tracking-wider text-indigo-300 mb-1">
+                  Responder Assessment Summary
+                </div>
+                ${escapeHtml(ev.responder_summary)}
+              </div>
+
+              <!-- Visible Reasoning Signals -->
+              <div class="mt-2.5">
+                <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">
+                  Visible Signals (${(ev.visible_signals || []).length})
+                </div>
+                <ul class="space-y-1">
+                  ${(ev.visible_signals || [])
+                    .map(
+                      sig => `
+                    <li class="text-xs text-slate-300 flex items-start gap-1.5">
+                      <span class="text-cyan-400 mt-0.5">•</span>
+                      <span>${escapeHtml(sig)}</span>
+                    </li>
+                  `
+                    )
+                    .join('')}
+                </ul>
+              </div>
+
+              <!-- Action Gate Footer -->
+              <div class="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
+                <span class="text-[11px] font-mono text-slate-500">
+                  Evaluated ${formatTime(zone.evaluated_at)} · ${zone.reports.length} report(s)
+                </span>
+
+                ${
+                  isPending
+                    ? `
+                  <button
+                    type="button"
+                    onclick="approveZoneAlert('${zone.id}')"
+                    class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs shadow-lg shadow-emerald-500/20 transition cursor-pointer"
+                  >
+                    Approve &amp; Broadcast
+                  </button>
+                `
+                    : `
+                  <span class="px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono text-xs">
+                    Broadcast Live ✓
+                  </span>
+                `
+                }
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+
+    function renderAll() {
+      renderCloudburstToggle();
+      renderZoneTabs();
+      renderApprovedAlertsBanner();
+      renderResidentReportingSection();
+      renderTelemetryCard();
+      renderReviewerQueue();
+    }
+
+    // =========================================================================
+    // Boot Sequence
+    // =========================================================================
+    (async function boot() {
+      initMap();
+      await checkEngineHealth();
+      await loadZones(true);
+      // Trigger live Gemini evaluation on the initially selected Kochi zone
+      if (state.selectedZoneId) {
+        await analyzeZone(state.selectedZoneId);
+      }
+    })();
+  </script>
+</body>
+</html>

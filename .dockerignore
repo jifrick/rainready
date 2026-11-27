@@ -1,0 +1,16 @@
+# Never bake local secrets into container images
+.env
+.env.*
+
+# Git & local dev artifacts
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+*.md
+*.log
