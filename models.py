@@ -1,14 +1,7 @@
-"""Central Gemini 4 + Decisions API model registry and client helpers.
+"""Central Gemini 4 + Decisions API model registry.
 
-Follows the November 2026 'Build with Gemini 4: Hackathon Builder Guide':
-- Stable v1 client for Gemini 4 model & Interactions API calls
-- v1beta client for Gemini Decision 1 (Decisions API) & Managed Agents
-- Reads GEMINI_API_KEY strictly from os.environ["GEMINI_API_KEY"] (loaded from .env locally)
+Follows the 'Build with Gemini 4: Hackathon Builder Guide'.
 """
-
-import os
-from dotenv import load_dotenv
-from google import genai
 
 MODEL_IDS: dict[str, str] = {
     # Gemini 4 reasoning and coding models (1M unified context + long decode)
@@ -42,20 +35,3 @@ MODEL_IDS: dict[str, str] = {
     "gemma_dense": "gemma-4-31b-it",
     "gemma_moe": "gemma-4-26b-a4b-it",
 }
-
-
-def get_api_key() -> str:
-    """Load .env and return os.environ['GEMINI_API_KEY'] strictly."""
-    load_dotenv(override=True)
-    api_key = os.environ["GEMINI_API_KEY"].strip()
-    if not api_key:
-        raise KeyError("GEMINI_API_KEY is empty")
-    return api_key
-
-
-def create_clients() -> tuple[genai.Client, genai.Client]:
-    """Return (stable_v1_client, v1beta_client) authenticated with GEMINI_API_KEY."""
-    api_key = get_api_key()
-    client = genai.Client(api_key=api_key)
-    beta_client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
-    return client, beta_client

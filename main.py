@@ -6,19 +6,20 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, Optional
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from google import genai
 from pydantic import BaseModel, Field
 
-from models import MODEL_IDS, create_clients
+from models import MODEL_IDS
 
-# Load environment variables from local .env file
-load_dotenv(override=True)
+# Load GEMINI_API_KEY from local .env at startup
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,56 +27,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger("rainready")
 
+# Official google-genai (>=3.2.0) clients:
+# - Stable v1 client for Gemini 4 Interactions API
+# - v1beta client for Gemini Decision 1 (Decisions API)
+client: Optional[genai.Client] = None
+beta_client: Optional[genai.Client] = None
+
+
+def _init_genai_clients() -> tuple[genai.Client, genai.Client]:
+    global client, beta_client
+    load_dotenv()
+    if not os.environ.get("GEMINI_API_KEY", "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured in .env or environment variables.",
+        )
+    if client is None or beta_client is None:
+        client = genai.Client()
+        beta_client = genai.Client(http_options={"api_version": "v1beta"})
+    return client, beta_client
+
+
+if os.environ.get("GEMINI_API_KEY", "").strip():
+    client = genai.Client()
+    beta_client = genai.Client(http_options={"api_version": "v1beta"})
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 CLOUD_RUN_PROJECT = "geminisprints26blr-3834"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
-SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Flood Risk Engine for Kochi, Kerala (Emergency Operations & Civic Resilience System).
-Synthesize live Open-Meteo precipitation telemetry, calibrated Gemini Decision 1 probability/rubric scores, neighborhood elevation/drainage terrain characteristics, and timestamped crowd-sourced resident reports into an actionable flood assessment.
-
-Calibration Guidelines:
-- LOW: Minimal or light rainfall with no significant waterlogging reports; storm drains operating within capacity.
-- WATCH: Moderate rainfall, blocked drain reports, ankle-deep ponding in low-lying pockets, or elevated runoff approaching canal/culvert capacity.
-- HIGH: Heavy rainfall / cloudburst conditions (e.g., >=30mm/hr), knee-deep waterlogging, multiple corroborating reports in sub-grade underpasses or low-elevation marshland corridors, or severe drainage obstruction during rain.
-
-Output Requirements:
-- Cite exact observable causal drivers in `visible_signals` (mm/hr rainfall, Decision 1 hazard probability/rubric score, elevation/canal bottleneck, and resident report details).
-- Keep `responder_summary` concise, operational, and tailored to municipal disaster-management human reviewers deciding whether to approve public broadcast.
-- Provide 2 to 3 concrete, plain-language `resident_actions` tailored to commuters and households in this specific Kochi neighborhood.
+SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Flood Actionable Reasoning Engine for Kochi, Kerala.
+Given live Open-Meteo rainfall telemetry, neighborhood elevation and drainage metadata, timestamped resident reports, and calibrated probabilities/scores from Gemini Decision 1:
+1. List exact observable signal drivers in `visible_signals` (citing exact rainfall rate in mm/hr, zone elevation/drainage metadata, resident reports, and calibrated Decision 1 signals).
+2. Write a concise operational verification note in `responder_summary` for municipal emergency management human reviewers.
+3. Provide 2 to 3 clear, practical next steps in `resident_actions` tailored to residents and commuters in this Kochi zone (e.g., moving parked vehicles, avoiding sub-grade underpasses, clearing storm grates, or normal transit readiness).
 """
 
 
 # ---------------------------------------------------------------------------
-# Pydantic Models (Structured Outputs & API Contracts)
+# Native Structured Output Schema & Request Models
 # ---------------------------------------------------------------------------
-class GeminiRiskAssessment(BaseModel):
-    risk_level: Literal["LOW", "WATCH", "HIGH"] = Field(
-        ...,
-        description="Overall flood risk classification: LOW, WATCH, or HIGH.",
-    )
-    confidence_score: int = Field(
-        ...,
-        ge=0,
-        le=100,
-        description="Calibrated confidence score from 0 to 100.",
-    )
+class Stage2ActionableReasoning(BaseModel):
     visible_signals: list[str] = Field(
         ...,
         min_length=2,
         max_length=6,
-        description="Specific observable drivers behind this assessment (rainfall mm, terrain/canal bottleneck, resident reports).",
+        description="Exact observable flood risk signal drivers (rainfall rate, elevation/drainage, resident reports).",
     )
     responder_summary: str = Field(
         ...,
-        description="Operational summary for human reviewers explaining why this risk level and confidence score were assigned.",
+        description="Concise verification note for human emergency reviewers.",
     )
     resident_actions: list[str] = Field(
         ...,
         min_length=2,
         max_length=3,
-        description="2 to 3 clear, practical next steps in plain language for neighborhood residents and commuters.",
+        description="2 to 3 clear, practical next steps in plain language for residents.",
     )
 
 
@@ -84,7 +93,7 @@ class AnalyzeRequest(BaseModel):
         default=None,
         ge=0.0,
         le=500.0,
-        description="Optional simulated rainfall intensity override (mm/hr) for responder cloudburst testing.",
+        description="Optional simulated rainfall intensity override (mm/hr) from the UI.",
     )
 
 
@@ -94,23 +103,23 @@ class ReportRequest(BaseModel):
         ...,
         min_length=2,
         max_length=80,
-        description="Reported waterlogging depth or condition (e.g., Ankle-Deep, Knee-Deep, Blocked Drain).",
+        description="Reported waterlogging depth or condition (Ankle-Deep, Knee-Deep, Blocked Drain).",
     )
     description: str = Field(
         default="",
         max_length=500,
-        description="Additional context from the resident.",
+        description="Additional landmark or street context from the resident.",
     )
     simulated_rain_mm: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=500.0,
-        description="Preserves active cloudburst simulation override if toggled in UI.",
+        description="Optional active cloudburst override if enabled in UI.",
     )
 
 
 # ---------------------------------------------------------------------------
-# Preloaded In-Memory Kochi Neighborhood Zones (Zero Static AI Responses)
+# 4 Kochi Neighborhood Zones (In-Memory State — Zero Static AI Responses)
 # ---------------------------------------------------------------------------
 def _build_initial_zones() -> dict[str, dict[str, Any]]:
     return {
@@ -296,7 +305,6 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
 ZONES: dict[str, dict[str, Any]] = _build_initial_zones()
 ZONE_LOCKS: dict[str, asyncio.Lock] = {zid: asyncio.Lock() for zid in ZONES}
 
-# Shared connection-pooled HTTP client for Cloud Run concurrency efficiency
 _http_client: Optional[httpx.AsyncClient] = None
 
 
@@ -318,22 +326,8 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _get_clients():
-    """Return (stable_v1_client, v1beta_client) using os.environ['GEMINI_API_KEY']."""
-    try:
-        return create_clients()
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "GEMINI_API_KEY is missing. Add GEMINI_API_KEY=<your_key> to the local .env "
-                "file in the workspace (or Cloud Run environment variables) to run live Gemini evaluations."
-            ),
-        ) from exc
-
-
 async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
-    """Fetch live current precipitation and rain from Open-Meteo API."""
+    """Fetch live precipitation (current=precipitation,rain) from Open-Meteo."""
     params = {
         "latitude": lat,
         "longitude": lng,
@@ -360,7 +354,7 @@ async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
     }
 
 
-def _build_shared_context_block(
+def _build_zone_input(
     zone: dict[str, Any],
     weather: dict[str, Any],
     simulated_rain_mm: Optional[float],
@@ -370,244 +364,215 @@ def _build_shared_context_block(
 
     if reports:
         formatted_reports = "\n".join(
-            f"  - [{r['timestamp']}] Severity/Type: {r['depth']} | Details: {r['description'] or 'Reported via 1-tap resident alert'}"
+            f"  - [{r['timestamp']}] {r['depth']}: {r['description']}"
             for r in reports[-15:]
         )
     else:
         formatted_reports = "  - None reported in this zone yet."
 
-    sim_note = (
-        f"ACTIVE CLOUDBURST OVERRIDE: {simulated_rain_mm:.1f} mm/hr simulated rainfall intensity "
-        f"(Live Open-Meteo baseline was {weather['observed_precipitation_mm']:.1f} mm). "
-        f"Treat {simulated_rain_mm:.1f} mm/hr as the active real-time rainfall intensity hitting this zone right now."
+    rain_mode = (
+        f"ACTIVE CLOUDBURST OVERRIDE: {simulated_rain_mm:.1f} mm/hr simulated rainfall "
+        f"(Live Open-Meteo baseline: {weather['observed_precipitation_mm']:.1f} mm). "
+        f"Evaluate {simulated_rain_mm:.1f} mm/hr as the current live rainfall intensity."
         if simulated_rain_mm is not None
         else (
-            f"LIVE TELEMETRY MODE: Active precipitation is {weather['observed_precipitation_mm']:.1f} mm "
-            f"(rain: {weather['observed_rain_mm']:.1f} mm) observed at {weather.get('observation_time', 'current')}."
+            f"LIVE OPEN-METEO TELEMETRY: precipitation={weather['observed_precipitation_mm']:.1f} mm, "
+            f"rain={weather['observed_rain_mm']:.1f} mm (observed at {weather.get('observation_time', 'now')})."
         )
     )
 
-    return f"""KOCHI NEIGHBORHOOD FLOOD TELEMETRY SNAPSHOT
-Zone ID: {zone['id']}
-Zone Name: {zone['name']} ({zone['subtitle']})
+    return f"""KOCHI HYPERLOCAL FLOOD TELEMETRY
+Zone: {zone['name']} ({zone['subtitle']}) [id={zone['id']}]
 Coordinates: {zone['lat']}, {zone['lng']}
-Mean Elevation: {meta['elevation_m']}m above MSL
-Design Storm Drainage Capacity: ~{meta['drainage_capacity_mm_hr']} mm/hr
+Baseline Elevation: {meta['elevation_m']}m above MSL
+Storm Drainage Design Capacity: ~{meta['drainage_capacity_mm_hr']} mm/hr
 Impervious Surface Coverage: {meta['impervious_surface_pct']}%
-Receiving Canal / Basin: {meta['canal_basin']}
-Terrain & Hydrological Profile: {meta['drainage_profile']}
+Canal / Outfall Basin: {meta['canal_basin']}
+Terrain & Drainage Metadata: {meta['drainage_profile']}
 
-WEATHER TELEMETRY:
-{sim_note}
-Effective Rainfall Intensity: {weather['effective_rain_mm']:.1f} mm/hr
+WEATHER SIGNAL:
+{rain_mode}
+Effective Rainfall Rate: {weather['effective_rain_mm']:.1f} mm/hr
 
-CROWD-SOURCED RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
+RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
 {formatted_reports}"""
 
 
-async def _run_decision_gate(
-    beta_client: Any,
-    shared_context: str,
-) -> dict[str, Any]:
-    """Stage 1: Fast calibrated gating & rubric scoring via Gemini Decision 1 (0 output tokens).
+def _to_plain_dict(obj: Any) -> dict[str, float]:
+    if obj is None:
+        return {}
+    if hasattr(obj, "model_dump"):
+        raw = obj.model_dump()
+    elif isinstance(obj, dict):
+        raw = obj
+    else:
+        raw = dict(obj)
+    return {str(k): round(float(v), 4) for k, v in raw.items()}
 
-    Follows the Gemini 4 Hackathon Builder Guide (Pages 6-8):
-    - Evaluates yes/no (`noul`), `choice` (with explicit `other` catch-all key), and ordered `score` rubric in 1 pass.
+
+async def _run_stage1_decision_gate(
+    v1beta_client: genai.Client,
+    shared_input: str,
+) -> dict[str, Any]:
+    """Stage 1 — Fast Calibration Gate (`gemini-decision-1` on `beta_client.decisions.create`).
+
+    Evaluates `escalate_alert` (noul), `risk_level` (choice with `other` catch-all),
+    and `severity_score` (3-level ordered score rubric) in one forward pass (0 output tokens).
     """
-    decision = await beta_client.aio.decisions.create(
+    decision = await asyncio.to_thread(
+        v1beta_client.decisions.create,
         model=MODEL_IDS["decisions"],
-        input=shared_context,
+        input=shared_input,
         questions={
-            "has_waterlogging_hazard": {
+            "escalate_alert": {
                 "type": "noul",
-                "instructions": (
-                    "Is active or imminent street-level waterlogging or drainage surcharge "
-                    "threatening safe neighborhood transit right now?"
-                ),
+                "instructions": "Should this zone trigger a flood watch or warning?",
             },
-            "risk_route": {
+            "risk_level": {
                 "type": "choice",
-                "instructions": "Which hyperlocal flood alert tier fits the current weather, terrain, and ground reports?",
+                "instructions": "Classify the flood risk level for this Kochi neighborhood zone right now.",
                 "criteria": {
-                    "high_alert": (
-                        "Severe rainfall/cloudburst (>=30mm/hr), knee-deep waterlogging reports, "
-                        "or overwhelmed sub-grade culvert/canal backflow."
+                    "high_danger": (
+                        "Heavy rainfall or cloudburst (>=30mm/hr), knee-deep waterlogging reports, "
+                        "or severe sub-grade underpass/canal surcharge."
                     ),
-                    "low_clear": (
-                        "Dry or light rainfall well within storm-drain capacity with no hazardous ponding reports."
+                    "low_risk": (
+                        "Dry or light rainfall well within storm drainage capacity and no hazardous waterlogging reports."
                     ),
                     "other": (
-                        "Ambiguous, contradictory, or unreadable sensor/report data requiring human inspection."
+                        "Ambiguous, contradictory, or unreadable sensor/report input requiring manual review."
                     ),
-                    "watch_advisory": (
-                        "Moderate rainfall, blocked drain report, ankle-deep ponding, or rising runoff approaching capacity."
+                    "watch_level": (
+                        "Moderate rainfall, blocked drain report, ankle-deep waterlogging, or rising canal backwater."
                     ),
                 },
             },
-            "drainage_stress": {
+            "severity_score": {
                 "type": "score",
-                "instructions": "Rate the hydrological stress on this neighborhood's storm drainage network.",
+                "instructions": "Rate waterlogging severity across 3 ordered levels from minor pooling to severe waterlogging.",
                 "criteria": [
-                    "Drains clear and operating comfortably within design capacity.",
-                    "Localized ponding, drain obstruction, or moderate runoff approaching culvert limits.",
-                    "Severe surcharge, knee-deep roadway flooding, or cloudburst runoff exceeding capacity.",
+                    "No flooding or minor surface dampness; storm drains flowing freely.",
+                    "Localized curb/ankle-deep pooling or partial drain blockage requiring caution.",
+                    "Severe knee-deep or impassable street waterlogging exceeding drainage capacity.",
                 ],
             },
         },
     )
 
-    hazard_ans = decision.answers["has_waterlogging_hazard"]
-    route_ans = decision.answers["risk_route"]
-    stress_ans = decision.answers["drainage_stress"]
+    escalate_ans = decision.answers["escalate_alert"]
+    risk_ans = decision.answers["risk_level"]
+    severity_ans = decision.answers["severity_score"]
 
-    choice_map = {
-        "low_clear": "LOW",
-        "watch_advisory": "WATCH",
-        "high_alert": "HIGH",
-        "other": "WATCH",
+    escalate_prob = float(getattr(escalate_ans, "noul", 0.0))
+    escalate_conf = float(getattr(escalate_ans, "confidence", 0.0))
+
+    choice_key = str(getattr(risk_ans, "choice", "other"))
+    choice_conf = float(getattr(risk_ans, "confidence", 0.0))
+    choice_probs = _to_plain_dict(getattr(risk_ans, "probabilities", None))
+
+    severity_val = float(getattr(severity_ans, "score", 0.0))
+    severity_conf = float(getattr(severity_ans, "confidence", 0.0))
+    severity_probs = getattr(severity_ans, "probabilities", None)
+    if severity_probs is not None and not isinstance(severity_probs, list):
+        severity_probs = list(severity_probs)
+
+    choice_to_ui_risk = {
+        "low_risk": "LOW",
+        "watch_level": "WATCH",
+        "high_danger": "HIGH",
+        "other": "WATCH" if escalate_prob >= 0.50 else "LOW",
     }
-    winning_choice = getattr(route_ans, "choice", "other")
-    recommended_risk = choice_map.get(winning_choice, "WATCH")
+    mapped_risk_level = choice_to_ui_risk.get(choice_key, "WATCH")
 
-    raw_probs = getattr(route_ans, "probabilities", {}) or {}
-    if hasattr(raw_probs, "model_dump"):
-        raw_probs = raw_probs.model_dump()
-    elif not isinstance(raw_probs, dict):
-        raw_probs = dict(raw_probs)
-
-    hazard_prob = float(getattr(hazard_ans, "noul", 0.0))
-    route_conf = float(getattr(route_ans, "confidence", 0.0))
-    hazard_conf = float(getattr(hazard_ans, "confidence", 0.0))
-    stress_score = float(getattr(stress_ans, "score", 0.0))
-    stress_conf = float(getattr(stress_ans, "confidence", 0.0))
-
-    # Escalate to deeper reasoning when hazard is present or Decision 1 certainty < 0.75 (Builder Guide p.8)
-    escalate = bool(
-        route_conf < 0.75
-        or hazard_prob > 0.50
-        or winning_choice in ("high_alert", "watch_advisory", "other")
-    )
-
-    calibrated_conf_pct = int(
-        round(max(0.0, min(1.0, (route_conf * 0.6 + hazard_conf * 0.25 + stress_conf * 0.15))) * 100)
-    )
+    # Extract calibrated confidence (0-100%) directly from decision.answers
+    calibrated_confidence_pct = int(round(max(0.0, min(1.0, choice_conf)) * 100))
 
     return {
         "model": MODEL_IDS["decisions"],
-        "hazard_probability": round(hazard_prob, 4),
-        "hazard_confidence": round(hazard_conf, 4),
-        "winning_choice": winning_choice,
-        "recommended_risk_level": recommended_risk,
-        "choice_probabilities": {k: round(float(v), 4) for k, v in raw_probs.items()},
-        "route_confidence": round(route_conf, 4),
-        "drainage_stress_score": round(stress_score, 4),
-        "calibrated_confidence_pct": calibrated_conf_pct,
-        "escalate_reasoning": escalate,
+        "escalate_alert_prob": round(escalate_prob, 4),
+        "escalate_alert_confidence": round(escalate_conf, 4),
+        "risk_choice_key": choice_key,
+        "mapped_risk_level": mapped_risk_level,
+        "risk_choice_probabilities": choice_probs,
+        "risk_choice_confidence": round(choice_conf, 4),
+        "calibrated_confidence_pct": calibrated_confidence_pct,
+        "severity_score": round(severity_val, 4),
+        "severity_max": 2.0,
+        "severity_confidence": round(severity_conf, 4),
+        "severity_probabilities": [round(float(p), 4) for p in (severity_probs or [])],
         "output_tokens_billed": 0,
     }
 
 
-async def _run_gemini4_synthesis(
-    client: Any,
-    shared_context: str,
-    decision_gate: Optional[dict[str, Any]],
-    previous_interaction_id: Optional[str],
-) -> tuple[GeminiRiskAssessment, dict[str, Any], Optional[str]]:
-    """Stage 2: Structured synthesis using Gemini 4 Interactions API (`client.aio.interactions.create`).
+async def _run_stage2_neon_reasoning(
+    v1_client: genai.Client,
+    shared_input: str,
+    stage1_gate: dict[str, Any],
+) -> tuple[Stage2ActionableReasoning, dict[str, Any], Optional[str]]:
+    """Stage 2 — Actionable Reasoning (`gemini-4-neon` on `client.interactions.create` with `thinking_level="medium"`).
 
-    Follows Gemini 4 Hackathon Builder Guide (Pages 5-6 & Page 11):
-    - Escalates to `gemini-4-neon` (`thinking_level="high"`) on elevated risk / low certainty, with
-      automatic fallback to `gemini-4-hydrogen` (`thinking_level="high"`) on free-tier AI Studio keys.
-    - Uses `gemini-4-hydrogen` (`thinking_level="low"`) for fast routine clear-weather evaluations.
-    - Uses thinking_level ("low" or "high") with native JSON Schema response_format only.
+    Uses native JSON Schema Structured Outputs (`response_format`) to generate `visible_signals`,
+    `responder_summary`, and `resident_actions`.
     """
-    escalate = bool(decision_gate["escalate_reasoning"]) if decision_gate else True
-    if escalate:
-        candidate_chain = [
-            (MODEL_IDS["frontier_fast"], "high", "Escalated via Decision 1 gate (hazard / uncertainty)"),
-            (MODEL_IDS["fast_workhorse"], "high", "Gemini 4 Hydrogen high-thinking synthesis"),
-        ]
-    else:
-        candidate_chain = [
-            (MODEL_IDS["fast_workhorse"], "low", "Fast-routed via Decision 1 high-confidence clear gate"),
-        ]
+    stage2_prompt = f"""{shared_input}
 
-    gate_context = ""
-    if decision_gate is not None:
-        gate_context = f"""
+STAGE 1 GEMINI DECISION 1 CALIBRATED PROBABILITIES & SCORES:
+- escalate_alert P(yes): {stage1_gate['escalate_alert_prob']:.4f} (confidence: {stage1_gate['escalate_alert_confidence']:.4f})
+- risk_level choice: "{stage1_gate['risk_choice_key']}" -> {stage1_gate['mapped_risk_level']} (calibrated confidence: {stage1_gate['calibrated_confidence_pct']}%)
+- risk_level choice probabilities: {stage1_gate['risk_choice_probabilities']}
+- severity_score (0.00 minor pooling to 2.00 severe waterlogging): {stage1_gate['severity_score']:.4f} / 2.00
 
-CALIBRATED GEMINI DECISION 1 GATE SIGNALS (0-output-token forward pass):
-- Waterlogging Hazard Probability P(yes): {decision_gate['hazard_probability']:.2f} (confidence: {decision_gate['hazard_confidence']:.2f})
-- Routed Tier: {decision_gate['winning_choice']} -> {decision_gate['recommended_risk_level']} (route confidence: {decision_gate['route_confidence']:.2f})
-- Tier Probabilities: {decision_gate['choice_probabilities']}
-- Drainage Stress Rubric Score: {decision_gate['drainage_stress_score']:.2f} / 2.00
-- Calibrated Baseline Confidence: {decision_gate['calibrated_confidence_pct']}%
+Generate `visible_signals`, `responder_summary`, and `resident_actions` consistent with these calibrated signals."""
 
-Ensure your structured assessment aligns with the physical evidence and calibrated probabilities above."""
-
-    full_input = f"{shared_context}{gate_context}\n\nProduce the structured flood risk JSON assessment."
-    schema_dict = GeminiRiskAssessment.model_json_schema()
+    response_schema = Stage2ActionableReasoning.model_json_schema()
+    neon_model = MODEL_IDS["frontier_fast"]
 
     last_err: Optional[Exception] = None
-    for model_id, thinking_level, route_reason in candidate_chain:
-        for attempt in range(2):
-            try:
-                kwargs: dict[str, Any] = {
-                    "model": model_id,
-                    "system_instruction": SYSTEM_INSTRUCTION,
-                    "input": full_input,
-                    "response_format": {
-                        "type": "text",
-                        "mime_type": "application/json",
-                        "schema": schema_dict,
-                    },
-                    "generation_config": {
-                        "thinking_level": thinking_level,
-                    },
-                }
-                if previous_interaction_id:
-                    kwargs["previous_interaction_id"] = previous_interaction_id
+    for attempt in range(2):
+        try:
+            interaction = await asyncio.to_thread(
+                v1_client.interactions.create,
+                model=neon_model,
+                system_instruction=SYSTEM_INSTRUCTION,
+                input=stage2_prompt,
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": response_schema,
+                },
+                generation_config={"thinking_level": "medium"},
+            )
+            output_text = getattr(interaction, "output_text", None)
+            if not output_text:
+                output_text = "".join(
+                    part.text
+                    for step in getattr(interaction, "steps", [])
+                    if getattr(step, "type", "") == "model_output"
+                    for part in getattr(step, "content", [])
+                    if getattr(part, "type", "") == "text"
+                )
+            if not output_text:
+                raise RuntimeError("Empty output_text returned from gemini-4-neon.")
 
-                interaction = await client.aio.interactions.create(**kwargs)
-                output_text = getattr(interaction, "output_text", None)
-                if not output_text:
-                    # Fallback extraction across model_output steps per Builder Guide p.6
-                    output_text = "".join(
-                        part.text
-                        for step in getattr(interaction, "steps", [])
-                        if getattr(step, "type", "") == "model_output"
-                        for part in getattr(step, "content", [])
-                        if getattr(part, "type", "") == "text"
-                    )
-                if not output_text:
-                    raise RuntimeError(f"Empty output_text from {model_id}")
+            parsed = Stage2ActionableReasoning.model_validate_json(output_text)
+            routing_meta = {
+                "decision_model": stage1_gate["model"],
+                "reasoning_model": neon_model,
+                "thinking_level": "medium",
+            }
+            return parsed, routing_meta, getattr(interaction, "id", None)
+        except Exception as exc:
+            last_err = exc
+            err_str = str(exc)
+            if attempt == 0 and ("429" in err_str or "503" in err_str or "UNAVAILABLE" in err_str):
+                await asyncio.sleep(1.5)
+                continue
+            break
 
-                assessment = GeminiRiskAssessment.model_validate_json(output_text)
-                routing_meta = {
-                    "synthesis_model": model_id,
-                    "thinking_level": thinking_level,
-                    "route_reason": route_reason,
-                    "decision_model": decision_gate["model"] if decision_gate else None,
-                    "chained_previous_interaction": bool(previous_interaction_id),
-                }
-                return assessment, routing_meta, getattr(interaction, "id", None)
-            except Exception as exc:
-                last_err = exc
-                err_str = str(exc)
-                # If previous_interaction_id expired (free-tier 1-day retention), retry statelessly once
-                if previous_interaction_id and ("interaction" in err_str.lower() or "404" in err_str):
-                    previous_interaction_id = None
-                    continue
-                if attempt == 0 and ("429" in err_str or "503" in err_str or "UNAVAILABLE" in err_str):
-                    await asyncio.sleep(1.2)
-                    continue
-                logger.info("Model %s (%s) unavailable or failed (%s); trying next if available.", model_id, thinking_level, err_str)
-                break
-
-    logger.exception("Gemini 4 synthesis failed: %s", last_err)
+    logger.exception("Stage 2 gemini-4-neon call failed: %s", last_err)
     raise HTTPException(
         status_code=502,
-        detail=f"Live Gemini 4 Interactions API call failed: {last_err}",
+        detail=f"Live Gemini 4 Neon Interactions API call failed: {last_err}",
     )
 
 
@@ -617,12 +582,12 @@ async def _evaluate_zone(
     if zone_id not in ZONES:
         raise HTTPException(status_code=404, detail=f"Unknown zone_id '{zone_id}'.")
 
-    client, beta_client = _get_clients()
+    v1_client, v1beta_client = _init_genai_clients()
 
     async with ZONE_LOCKS[zone_id]:
         zone = ZONES[zone_id]
 
-        # 1. Fetch live precipitation from Open-Meteo
+        # 1. Fetch live Open-Meteo precipitation
         try:
             live_weather = await _fetch_open_meteo(zone["lat"], zone["lng"])
         except httpx.HTTPError as exc:
@@ -656,33 +621,39 @@ async def _evaluate_zone(
             "fetched_at": _utc_now_iso(),
         }
 
-        shared_context = _build_shared_context_block(
-            zone=zone,
-            weather=weather_snapshot,
-            simulated_rain_mm=simulated_rain_mm,
-        )
+        shared_input = _build_zone_input(zone, weather_snapshot, simulated_rain_mm)
 
-        # 2. Stage 1: Gemini Decision 1 calibrated probability & rubric gate (v1beta)
-        decision_telemetry: Optional[dict[str, Any]] = None
+        # 2. Stage 1 — Fast Calibration Gate (gemini-decision-1 on beta_client.decisions.create)
         try:
-            decision_telemetry = await _run_decision_gate(beta_client, shared_context)
-        except Exception as dec_exc:
-            logger.warning("Gemini Decision 1 gate warning (continuing with Gemini 4 escalation): %s", dec_exc)
+            stage1_gate = await _run_stage1_decision_gate(v1beta_client, shared_input)
+        except Exception as exc:
+            logger.exception("Stage 1 gemini-decision-1 call failed: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Live Gemini Decision 1 API call failed: {exc}",
+            ) from exc
 
-        # 3. Stage 2: Gemini 4 Interactions API Structured Output synthesis (v1)
-        assessment, routing_meta, interaction_id = await _run_gemini4_synthesis(
-            client=client,
-            shared_context=shared_context,
-            decision_gate=decision_telemetry,
-            previous_interaction_id=zone.get("last_interaction_id"),
+        # 3. Stage 2 — Actionable Reasoning (gemini-4-neon on client.interactions.create, thinking_level="medium")
+        stage2_reasoning, routing_meta, interaction_id = await _run_stage2_neon_reasoning(
+            v1_client=v1_client,
+            shared_input=shared_input,
+            stage1_gate=stage1_gate,
         )
-        eval_dict = assessment.model_dump()
 
-        # 4. Enter PENDING_REVIEW Human-in-the-Loop Gate
+        # Combine Stage 1 calibrated risk/confidence/severity with Stage 2 structured reasoning
+        eval_dict = {
+            "risk_level": stage1_gate["mapped_risk_level"],
+            "confidence_score": stage1_gate["calibrated_confidence_pct"],
+            "severity_score": stage1_gate["severity_score"],
+            "escalate_alert_prob": stage1_gate["escalate_alert_prob"],
+            **stage2_reasoning.model_dump(),
+        }
+
+        # 4. Hold in PENDING_REVIEW until responder clicks Approve & Broadcast
         now_iso = _utc_now_iso()
         zone["weather"] = weather_snapshot
         zone["latest_evaluation"] = eval_dict
-        zone["decisions_telemetry"] = decision_telemetry
+        zone["decisions_telemetry"] = stage1_gate
         zone["routing_info"] = routing_meta
         zone["last_interaction_id"] = interaction_id
         zone["review_status"] = "PENDING_REVIEW"
@@ -696,7 +667,7 @@ async def _evaluate_zone(
             "approved": zone["approved"],
             "evaluated_at": now_iso,
             "weather": weather_snapshot,
-            "decisions_telemetry": decision_telemetry,
+            "decisions_telemetry": stage1_gate,
             "routing_info": routing_meta,
             "interaction_id": interaction_id,
             "report_count": len(zone["reports"]),
@@ -704,15 +675,15 @@ async def _evaluate_zone(
 
 
 # ---------------------------------------------------------------------------
-# FastAPI Application & Endpoints
+# FastAPI App & Routes
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="RainReady — Kochi Hyperlocal Flood Alert Engine",
     description=(
-        "Live Open-Meteo + Gemini Decision 1 + Gemini 4 (Hydrogen/Neon) neighborhood "
-        "flood risk engine with human-in-the-loop broadcast gate."
+        "Two-stage live flood alert workflow pairing Gemini Decision 1 (calibrated gate) "
+        "with Gemini 4 Neon (thinking_level='medium' structured reasoning) for Cloud Run."
     ),
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -727,16 +698,16 @@ async def serve_index() -> FileResponse:
 
 @app.get("/api/health")
 async def health_check() -> dict[str, Any]:
-    load_dotenv(override=True)
+    load_dotenv()
     has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     return {
         "status": "ok",
         "service": "rainready",
         "cloud_run_project": CLOUD_RUN_PROJECT,
         "models": {
-            "decision_gate": MODEL_IDS["decisions"],
-            "workhorse": MODEL_IDS["fast_workhorse"],
-            "frontier_escalation": MODEL_IDS["frontier_fast"],
+            "stage1_gate": MODEL_IDS["decisions"],
+            "stage2_reasoning": MODEL_IDS["frontier_fast"],
+            "thinking_level": "medium",
         },
         "gemini_key_configured": has_key,
     }
@@ -782,7 +753,7 @@ async def submit_report(report_req: ReportRequest) -> dict[str, Any]:
     }
     ZONES[zone_id]["reports"].append(report_entry)
 
-    # Immediately re-run live Decision 1 + Gemini 4 evaluation with the new resident report included
+    # Immediately re-run both gemini-decision-1 and gemini-4-neon so confidence and risk update live
     evaluation_result = await _evaluate_zone(
         zone_id=zone_id,
         simulated_rain_mm=report_req.simulated_rain_mm,
@@ -842,6 +813,5 @@ async def reset_demo_state() -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
-    # Cloud Run Container Contract: bind 0.0.0.0 on injected $PORT (default 8080)
     port = int(os.environ.get("PORT", "8080"))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

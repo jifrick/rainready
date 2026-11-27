@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RainReady · Kochi Hyperlocal Flood Alert Engine (Gemini 4 + Decisions API)</title>
+  <title>RainReady · Kochi Hyperlocal Flood Alert Engine (Gemini Decision 1 + Gemini 4 Neon)</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230284c7'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white'>🌧</text></svg>" />
 
   <!-- Tailwind CSS CDN -->
@@ -94,7 +94,7 @@
             </span>
           </div>
           <p class="text-xs text-slate-400">
-            Open-Meteo Live + <span class="font-mono text-indigo-300">gemini-decision-1</span> Calibrated Gate → <span class="font-mono text-cyan-300">gemini-4-hydrogen / neon</span> Interactions Engine
+            Stage 1 <span class="font-mono text-indigo-300">gemini-decision-1</span> Calibrated Gate → Stage 2 <span class="font-mono text-cyan-300">gemini-4-neon</span> (<span class="font-mono">thinking_level="medium"</span>)
           </p>
         </div>
       </div>
@@ -188,7 +188,7 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
           </svg>
-          <span id="map-loading-text">Running Decision 1 + Gemini 4...</span>
+          <span id="map-loading-text">Running Decision 1 + Gemini 4 Neon...</span>
         </div>
       </div>
 
@@ -204,7 +204,7 @@
               1-Tap Report Waterlogging
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">
-              Tap a condition below to submit a live ground report for <strong id="report-zone-label" class="text-cyan-300">—</strong> and immediately re-run Decision 1 + Gemini 4 analysis.
+              Tap a condition below to submit a live ground report for <strong id="report-zone-label" class="text-cyan-300">—</strong> and immediately re-run <span class="font-mono text-slate-300">gemini-decision-1</span> + <span class="font-mono text-slate-300">gemini-4-neon</span>.
             </p>
           </div>
           <span id="report-count-badge" class="text-[11px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
@@ -217,7 +217,7 @@
             id="report-description"
             type="text"
             maxlength="280"
-            placeholder="Optional landmark/street note (e.g., Water rising near underpass entry / bus stop grate clogged)..."
+            placeholder="Optional landmark/street note (e.g., Parked cars surrounded near underpass / culvert grate blocked)..."
             class="w-full rounded-xl bg-slate-950/90 border border-slate-800 focus:border-cyan-500/60 focus:outline-none px-3.5 py-2 text-xs text-slate-200 placeholder-slate-500"
           />
         </div>
@@ -285,7 +285,7 @@
           onclick="analyzeSelectedZone()"
           class="px-3 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-xs font-medium text-cyan-200 transition cursor-pointer disabled:opacity-50"
         >
-          ↻ Re-Run Live Gemini 4
+          ↻ Re-Run Decision 1 + Neon
         </button>
       </div>
 
@@ -300,7 +300,7 @@
               </span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">
-              Injects a severe 45.0 mm/hr monsoon cloudburst into <span class="font-mono text-slate-300">/api/analyze/{zone_id}</span> to demonstrate live Decision 1 escalation &amp; Gemini 4 synthesis.
+              Overrides <span class="font-mono text-slate-300">simulated_rain_mm=45</span> on <span class="font-mono text-slate-300">/api/analyze/{zone_id}</span> and runs live <span class="font-mono text-slate-300">gemini-decision-1</span> + <span class="font-mono text-slate-300">gemini-4-neon</span>.
             </p>
           </div>
 
@@ -427,7 +427,7 @@
       const reportBtns = document.querySelectorAll('.report-btn');
 
       if (zoneId) {
-        textEl.textContent = label || 'Querying Open-Meteo, Decision 1 & Gemini 4...';
+        textEl.textContent = label || 'Querying Open-Meteo, Decision 1 & Gemini 4 Neon...';
         overlay.classList.remove('hidden');
         reanalyzeBtn.disabled = true;
         reportBtns.forEach(b => (b.disabled = true));
@@ -489,8 +489,8 @@
 
         const evalObj = zone.latest_evaluation;
         const statusText = evalObj
-          ? `${evalObj.risk_level} (${evalObj.confidence_score}% conf) · ${zone.review_status}`
-          : 'Click to run live Decision 1 + Gemini 4 analysis';
+          ? `${evalObj.risk_level} (${evalObj.confidence_score}% calibrated conf) · ${zone.review_status}`
+          : 'Click to run live Decision 1 + Gemini 4 Neon analysis';
 
         polygonLayers[zoneId].bindTooltip(
           `<div class="text-xs font-sans"><strong>${escapeHtml(zone.name)}</strong><br/>${escapeHtml(statusText)}</div>`,
@@ -517,11 +517,11 @@
         const txt = document.getElementById('engine-text');
         if (data.gemini_key_configured) {
           dot.className = 'w-2 h-2 rounded-full bg-emerald-400 shadow shadow-emerald-400/60';
-          txt.textContent = `${data.models.decision_gate} + ${data.models.workhorse} · Live`;
+          txt.textContent = `${data.models.stage1_gate} + ${data.models.stage2_reasoning} (${data.models.thinking_level}) · Live`;
         } else {
           dot.className = 'w-2 h-2 rounded-full bg-rose-400 animate-pulse';
           txt.textContent = 'GEMINI_API_KEY Missing (.env)';
-          showError('GEMINI_API_KEY is not configured in .env yet. Paste your AI Studio key into .env to run live Gemini Decision 1 + Gemini 4 evaluations.');
+          showError('GEMINI_API_KEY is not configured in .env yet.');
         }
       } catch (err) {
         console.error('Health check failed:', err);
@@ -579,8 +579,8 @@
       setLoading(
         zoneId,
         state.simulateCloudburst
-          ? `Simulating 45mm/hr Cloudburst on ${zone.name} (Decision 1 + Gemini 4)...`
-          : `Analyzing ${zone.name} via Open-Meteo, Decision 1 & Gemini 4...`
+          ? `Simulating 45mm/hr Cloudburst on ${zone.name} (Decision 1 + Neon)...`
+          : `Analyzing ${zone.name} via Open-Meteo, Decision 1 & Gemini 4 Neon...`
       );
 
       try {
@@ -601,7 +601,7 @@
         await checkEngineHealth();
         await loadZones(false);
       } catch (err) {
-        showError(err.message || 'Live Gemini 4 risk analysis failed.');
+        showError(err.message || 'Live Gemini 4 analysis failed.');
       } finally {
         setLoading(null);
       }
@@ -616,7 +616,7 @@
       const zoneName = state.zones[zoneId]?.name || zoneId;
 
       hideError();
-      setLoading(zoneId, `Submitting "${depthType}" report & re-scoring ${zoneName}...`);
+      setLoading(zoneId, `Submitting "${depthType}" report & re-running Decision 1 + Neon for ${zoneName}...`);
 
       try {
         const res = await fetch('/api/report', {
@@ -775,8 +775,8 @@
                 <p class="text-xs text-slate-400 mt-0.5">
                   ${
                     hasPending
-                      ? `Decision 1 + Gemini 4 generated a live <strong class="text-amber-300">${escapeHtml(currentZone.latest_evaluation.risk_level)}</strong> assessment for <strong>${escapeHtml(currentZone.name)}</strong>. Click <strong>Approve &amp; Broadcast</strong> in the Responder Queue to publish it here.`
-                      : 'Select any Kochi zone on the map to run a live Decision 1 + Gemini 4 assessment, then approve it in the Responder Queue to broadcast verified guidance.'
+                      ? `Decision 1 + Gemini 4 Neon generated a live <strong class="text-amber-300">${escapeHtml(currentZone.latest_evaluation.risk_level)}</strong> assessment (${currentZone.latest_evaluation.confidence_score}% calibrated confidence) for <strong>${escapeHtml(currentZone.name)}</strong>. Click <strong>Approve &amp; Broadcast</strong> in the Responder Queue to publish it here.`
+                      : 'Select any Kochi zone on the map to run live Decision 1 + Gemini 4 Neon evaluation, then approve it in the Responder Queue to broadcast verified guidance.'
                   }
                 </p>
               </div>
@@ -799,6 +799,7 @@
       container.innerHTML = sortedApproved
         .map(zone => {
           const alert = zone.approved_alert;
+          const dec = alert.decisions_telemetry || {};
           const theme = RISK_STYLES[alert.risk_level] || RISK_STYLES.LOW;
           const isOpen = Boolean(state.expandedSignalZones[zone.id]);
           const hasNewerPending = zone.review_status === 'PENDING_REVIEW';
@@ -821,7 +822,7 @@
                   }
                 </div>
                 <span class="text-xs font-mono text-slate-400">
-                  Calibrated Confidence: <strong class="text-slate-200">${alert.confidence_score}%</strong>
+                  Decision 1 Confidence: <strong class="text-slate-200">${alert.confidence_score}%</strong>
                 </span>
               </div>
 
@@ -843,32 +844,57 @@
                 </ul>
               </div>
 
+              <!-- Expandable "Why am I seeing this?" Drawer showing BOTH gemini-decision-1 calibrated confidence & gemini-4-neon drivers -->
               <div class="mt-3 pt-2.5 border-t border-slate-800/80">
                 <button
                   type="button"
                   onclick="toggleSignalDrawer('${zone.id}')"
                   class="flex items-center justify-between w-full text-left text-xs font-medium text-cyan-300 hover:text-cyan-200 cursor-pointer"
                 >
-                  <span>Why am I seeing this? (${(alert.visible_signals || []).length} verified risk signals)</span>
-                  <span class="font-mono text-[11px]">${isOpen ? '▲ Hide signals' : '▼ Show breakdown'}</span>
+                  <span>Why am I seeing this? (gemini-decision-1 calibration + gemini-4-neon drivers)</span>
+                  <span class="font-mono text-[11px]">${isOpen ? '▲ Hide breakdown' : '▼ Show breakdown'}</span>
                 </button>
 
                 ${
                   isOpen
                     ? `
-                  <div class="mt-2.5 rounded-lg bg-slate-900/90 border border-slate-800 p-3 space-y-2">
-                    <div class="flex flex-wrap gap-3 text-[11px] font-mono text-slate-400">
-                      <span>Effective Rain: <strong class="text-slate-200">${
-                        alert.weather ? alert.weather.effective_rain_mm.toFixed(1) + ' mm/hr' : '—'
-                      }</strong></span>
-                      <span>Elevation: <strong class="text-slate-200">${zone.metadata.elevation_m}m MSL</strong></span>
-                      <span>Citizen Reports: <strong class="text-slate-200">${alert.report_count ?? 0}</strong></span>
+                  <div class="mt-2.5 rounded-lg bg-slate-900/95 border border-slate-800 p-3 space-y-3">
+                    <!-- Stage 1: gemini-decision-1 Calibrated Gate -->
+                    <div class="rounded-lg bg-indigo-950/30 border border-indigo-500/30 p-2.5">
+                      <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-wider text-indigo-300 mb-1.5">
+                        <span>Stage 1 · gemini-decision-1 Calibrated Gate (0 Output Tokens)</span>
+                        <span>Choice: ${escapeHtml(dec.risk_choice_key || '—')}</span>
+                      </div>
+                      <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+                        <div class="bg-slate-950/75 rounded px-2 py-1 border border-slate-800">
+                          <span class="text-[10px] text-slate-400 block">Calibrated Confidence</span>
+                          <strong class="text-emerald-300">${alert.confidence_score}%</strong>
+                        </div>
+                        <div class="bg-slate-950/75 rounded px-2 py-1 border border-slate-800">
+                          <span class="text-[10px] text-slate-400 block">Escalate Alert (noul)</span>
+                          <strong class="text-white">${dec.escalate_alert_prob !== undefined ? Math.round(dec.escalate_alert_prob * 100) + '%' : '—'}</strong>
+                        </div>
+                        <div class="bg-slate-950/75 rounded px-2 py-1 border border-slate-800">
+                          <span class="text-[10px] text-slate-400 block">Severity Score (0–2)</span>
+                          <strong class="text-white">${dec.severity_score !== undefined ? Number(dec.severity_score).toFixed(2) + ' / 2.00' : '—'}</strong>
+                        </div>
+                      </div>
                     </div>
-                    <ul class="space-y-1 text-xs text-slate-300 list-disc list-inside">
-                      ${(alert.visible_signals || [])
-                        .map(sig => `<li>${escapeHtml(sig)}</li>`)
-                        .join('')}
-                    </ul>
+
+                    <!-- Stage 2: gemini-4-neon Actionable Signal Drivers -->
+                    <div>
+                      <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-wider text-cyan-300 mb-1.5">
+                        <span>Stage 2 · gemini-4-neon Signal Drivers (thinking_level="medium")</span>
+                        <span class="text-slate-400">Rain: ${
+                          alert.weather ? alert.weather.effective_rain_mm.toFixed(1) + ' mm/hr' : '—'
+                        } · Elev: ${zone.metadata.elevation_m}m · Reports: ${alert.report_count ?? 0}</span>
+                      </div>
+                      <ul class="space-y-1 text-xs text-slate-300 list-disc list-inside">
+                        ${(alert.visible_signals || [])
+                          .map(sig => `<li>${escapeHtml(sig)}</li>`)
+                          .join('')}
+                      </ul>
+                    </div>
                   </div>
                 `
                     : ''
@@ -975,15 +1001,15 @@
       if (!dec && !route) return '';
 
       const modelBadge = route
-        ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">${escapeHtml(route.synthesis_model)} · thinking=${escapeHtml(route.thinking_level)}</span>`
+        ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">${escapeHtml(route.reasoning_model)} · thinking=${escapeHtml(route.thinking_level)}</span>`
         : '';
 
       if (!dec) {
         return `<div class="mt-2.5 flex flex-wrap gap-1.5">${modelBadge}</div>`;
       }
 
-      const hazardPct = Math.round(dec.hazard_probability * 100);
-      const stressVal = Number(dec.drainage_stress_score || 0).toFixed(2);
+      const escPct = Math.round(Number(dec.escalate_alert_prob || 0) * 100);
+      const sevVal = Number(dec.severity_score || 0).toFixed(2);
 
       return `
         <div class="mt-2.5 rounded-lg bg-indigo-950/25 border border-indigo-500/30 p-2.5 space-y-1.5">
@@ -995,16 +1021,16 @@
           </div>
           <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
             <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
-              <span class="text-slate-400 block text-[10px]">P(Hazard noul)</span>
-              <strong class="text-white">${hazardPct}%</strong>
+              <span class="text-slate-400 block text-[10px]">escalate_alert (noul)</span>
+              <strong class="text-white">${escPct}%</strong>
             </div>
             <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
-              <span class="text-slate-400 block text-[10px]">Route Conf</span>
-              <strong class="text-white">${Math.round(dec.route_confidence * 100)}%</strong>
+              <span class="text-slate-400 block text-[10px]">risk_level (choice)</span>
+              <strong class="text-white">${escapeHtml(dec.risk_choice_key)}</strong>
             </div>
             <div class="bg-slate-950/70 rounded px-2 py-1 border border-slate-800">
-              <span class="text-slate-400 block text-[10px]">Drain Rubric</span>
-              <strong class="text-white">${stressVal} / 2.0</strong>
+              <span class="text-slate-400 block text-[10px]">severity_score</span>
+              <strong class="text-white">${sevVal} / 2.00</strong>
             </div>
           </div>
         </div>
@@ -1033,7 +1059,7 @@
         listEl.innerHTML = `
           <div class="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center">
             <p class="text-xs text-slate-400">
-              No AI evaluations in the queue yet. Click any zone on the map or click <strong>↻ Re-Run Live Gemini 4</strong> to generate a live risk assessment.
+              No AI evaluations in the queue yet. Click any zone on the map or click <strong>↻ Re-Run Decision 1 + Neon</strong> to generate a live risk assessment.
             </p>
           </div>
         `;
@@ -1082,7 +1108,7 @@
 
               <div class="mt-2.5">
                 <div class="flex items-center justify-between text-xs mb-1">
-                  <span class="text-slate-400">Calibrated Confidence Score</span>
+                  <span class="text-slate-400">Decision 1 Calibrated Confidence</span>
                   <span class="font-mono font-bold text-white">${ev.confidence_score}%</span>
                 </div>
                 <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -1097,14 +1123,14 @@
 
               <div class="mt-3 text-xs text-slate-200 leading-relaxed bg-slate-900/90 border border-slate-800/90 rounded-lg p-2.5">
                 <div class="text-[10px] font-mono uppercase tracking-wider text-indigo-300 mb-1">
-                  Responder Assessment Summary
+                  Gemini 4 Neon Responder Summary (thinking_level="medium")
                 </div>
                 ${escapeHtml(ev.responder_summary)}
               </div>
 
               <div class="mt-2.5">
                 <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-1">
-                  Visible Signals (${(ev.visible_signals || []).length})
+                  Gemini 4 Neon Reasoning Signals (${(ev.visible_signals || []).length})
                 </div>
                 <ul class="space-y-1">
                   ${(ev.visible_signals || [])
