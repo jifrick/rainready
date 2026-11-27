@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./static/rainready-banner.png" alt="RainReady — Neighborhood Flood Alerts" width="100%" />
+</p>
+
 # RainReady — Kochi Hyperlocal Flood Alert Engine
 
 Built following the **Build with Gemini 4: Hackathon Builder Guide** and packaged for **Google Cloud Run** (`geminisprints26blr-3834`) on port `8080`.

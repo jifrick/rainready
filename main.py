@@ -969,6 +969,11 @@ async def serve_index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon")
+
+
 @app.get("/api/health")
 async def health_check() -> dict[str, Any]:
     load_dotenv(override=True)
