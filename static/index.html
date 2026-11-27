@@ -48,7 +48,6 @@
       background: #e2e8f0 !important;
       font-family: 'Inter', sans-serif;
     }
-    /* Keep OpenStreetMap street names, waterways, and roads crisp and easy to read */
     .leaflet-tile-pane {
       filter: brightness(0.96) contrast(1.03);
     }
@@ -154,7 +153,7 @@
       </div>
     </div>
 
-    <!-- Subtle Connection Notice Banner (Only shown on network/service error) -->
+    <!-- Subtle Connection Notice Banner -->
     <div id="error-banner" class="hidden bg-rose-950/90 border-t border-rose-500/40 px-4 sm:px-6 py-2 text-xs text-rose-200">
       <div class="max-w-[1440px] mx-auto flex items-center justify-between gap-3">
         <span id="error-banner-msg"></span>
@@ -205,23 +204,21 @@
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
             </svg>
-            <span id="live-updating-text">Checking live risk...</span>
+            <span id="live-updating-text">Checking 6-hour rain forecast...</span>
           </span>
         </div>
 
         <div id="zone-pills" class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <!-- Populated dynamically -->
         </div>
       </div>
 
-      <!-- Actionable Alert Card (Prominent Next Steps + Expandable "Why am I seeing this?") -->
+      <!-- Selected Zone Forecast, Time-to-Flood Warning Banner, 6-Hour Strip & Approved Alert Card -->
       <div id="actionable-alert-card" class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5 shadow-xl transition-all">
-        <!-- Populated dynamically -->
       </div>
 
       <!-- Interactive Map Card -->
       <div class="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 shadow-xl">
-        <div id="kochi-map" class="w-full h-[340px] sm:h-[400px] z-10"></div>
+        <div id="kochi-map" class="w-full h-[340px] sm:h-[390px] z-10"></div>
 
         <!-- Clean Everyday Legend (Green = Safe, Amber = Watch, Red = Flood Risk) -->
         <div class="absolute bottom-3 left-3 z-20 bg-slate-950/92 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2 text-xs shadow-lg">
@@ -253,7 +250,6 @@
           </span>
         </div>
 
-        <!-- Big Touch-Friendly Condition Selector Buttons -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
           <button
             type="button"
@@ -295,7 +291,6 @@
           </button>
         </div>
 
-        <!-- Optional 1-Line Note + Prominent Send Report Button -->
         <div class="flex flex-col sm:flex-row gap-2.5">
           <input
             id="report-description"
@@ -316,7 +311,6 @@
 
         <div id="report-feedback" class="hidden mt-2.5 text-xs text-emerald-300 font-medium"></div>
 
-        <!-- Recent Neighbor Reports -->
         <div id="recent-reports-list" class="mt-3.5 pt-3.5 border-t border-slate-800/80 hidden">
         </div>
       </div>
@@ -334,7 +328,7 @@
             <div class="flex items-center gap-2">
               <h2 class="text-sm sm:text-base font-bold text-white">Test Heavy Rain (45mm/hr)</h2>
               <span id="sim-badge" class="hidden text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                Active
+                3h Storm Active
               </span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">
@@ -386,7 +380,6 @@
         </div>
 
         <div id="reviewer-queue-list" class="space-y-3.5">
-          <!-- Populated dynamically -->
         </div>
       </div>
     </aside>
@@ -408,42 +401,41 @@
     let map = null;
     const polygonLayers = {};
 
-    // Plain-language friendly risk themes (Green = Safe, Amber = Watch, Red = Flood Risk)
     const RISK_UI = {
       LOW: {
         shortLabel: 'Safe',
-        alertHeadline: 'Roads Clear — Low Flood Risk',
         strokeColor: '#059669',
         fillColor: '#10b981',
         pillBadge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35',
-        cardStyle: 'border-emerald-500/40 bg-emerald-950/20',
+        cardStyle: 'border-emerald-500/35 bg-slate-900/85',
+        bannerBox: 'bg-emerald-950/35 border-emerald-500/35 text-emerald-100',
         barColor: 'bg-emerald-500',
       },
       WATCH: {
         shortLabel: 'Watch',
-        alertHeadline: 'Flood Watch — Use Caution on Low Roads',
         strokeColor: '#d97706',
         fillColor: '#f59e0b',
         pillBadge: 'bg-amber-500/20 text-amber-200 border-amber-500/40',
-        cardStyle: 'border-amber-500/45 bg-amber-950/25',
+        cardStyle: 'border-amber-500/45 bg-amber-950/20',
+        bannerBox: 'bg-amber-950/45 border-amber-500/45 text-amber-100',
         barColor: 'bg-amber-400',
       },
       HIGH: {
         shortLabel: 'Flood Risk',
-        alertHeadline: 'Flood Warning — Avoid Waterlogged Streets',
         strokeColor: '#dc2626',
         fillColor: '#ef4444',
         pillBadge: 'bg-rose-500/20 text-rose-200 border-rose-500/50',
-        cardStyle: 'border-rose-500/55 bg-rose-950/30',
+        cardStyle: 'border-rose-500/55 bg-rose-950/25',
+        bannerBox: 'bg-rose-950/55 border-rose-500/55 text-rose-100',
         barColor: 'bg-rose-500',
       },
       UNASSESSED: {
         shortLabel: 'Tap to check',
-        alertHeadline: 'Checking street conditions',
         strokeColor: '#475569',
         fillColor: '#64748b',
         pillBadge: 'bg-slate-800 text-slate-300 border-slate-700',
         cardStyle: 'border-slate-800 bg-slate-900/80',
+        bannerBox: 'bg-slate-950/70 border-slate-800 text-slate-200',
         barColor: 'bg-slate-500',
       },
     };
@@ -539,7 +531,7 @@
       const reanalyzeBtn = document.getElementById('reanalyze-btn');
 
       if (zoneId) {
-        textEl.textContent = label || 'Checking live flood risk...';
+        textEl.textContent = label || 'Checking 6-hour rain forecast...';
         indicator.classList.remove('hidden');
         sendBtn.disabled = true;
         reanalyzeBtn.disabled = true;
@@ -550,9 +542,6 @@
       }
     }
 
-    // =========================================================================
-    // Clean OpenStreetMap Initialization (Zero Watermarks, Clear Kochi Roads)
-    // =========================================================================
     function initMap() {
       map = L.map('kochi-map', {
         center: [9.985, 76.295],
@@ -607,7 +596,7 @@
         const ui = RISK_UI[evalObj ? evalObj.risk_level : 'UNASSESSED'] || RISK_UI.UNASSESSED;
         const statusLine = evalObj
           ? `${ui.shortLabel} (${evalObj.confidence_score}% AI confidence)`
-          : 'Tap to check live street risk';
+          : 'Tap to check 6-hour rain & flood risk';
 
         polygonLayers[zoneId].bindTooltip(
           `<div class="text-xs font-sans"><strong>${escapeHtml(zone.name)}</strong><br/>${escapeHtml(statusLine)}</div>`,
@@ -627,7 +616,7 @@
     }
 
     // =========================================================================
-    // Live Backend API Calls (Unchanged Endpoints)
+    // Live Backend API Calls
     // =========================================================================
     async function checkEngineHealth() {
       try {
@@ -636,7 +625,7 @@
         const dot = document.getElementById('status-dot');
         if (data.gemini_key_configured) {
           dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow shadow-emerald-400/50 inline-block';
-          dot.title = 'Live flood alert service online';
+          dot.title = `Live service online (${data.weather_provider})`;
         } else {
           dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse inline-block';
           dot.title = 'Live AI key not configured yet';
@@ -699,8 +688,8 @@
       setLoading(
         zoneId,
         state.simulateCloudburst
-          ? `Scoring heavy rain in ${zone.name}...`
-          : `Checking live streets in ${zone.name}...`
+          ? `Simulating 3-hour 45mm/hr storm in ${zone.name}...`
+          : `Checking 6-hour rain forecast for ${zone.name}...`
       );
 
       try {
@@ -713,13 +702,13 @@
         });
         const payload = await res.json();
         if (!res.ok) {
-          throw new Error(payload.detail || 'Could not refresh street flood risk right now.');
+          throw new Error(payload.detail || 'Could not refresh street flood forecast right now.');
         }
 
         await checkEngineHealth();
         await loadZones(false);
       } catch (err) {
-        showError(err.message || 'Could not refresh street flood risk right now.');
+        showError(err.message || 'Could not refresh street flood forecast right now.');
       } finally {
         setLoading(null);
       }
@@ -756,7 +745,7 @@
         }
 
         descInput.value = '';
-        feedbackEl.textContent = `✓ Thank you — your "${condition}" report updated the live flood score for ${zoneName}.`;
+        feedbackEl.textContent = `✓ Thank you — your "${condition}" report updated the live flood forecast for ${zoneName}.`;
         feedbackEl.classList.remove('hidden');
         await loadZones(false);
       } catch (err) {
@@ -811,6 +800,129 @@
       await fetch('/api/reset', { method: 'POST' });
       await loadZones(true);
     });
+
+    // =========================================================================
+    // 6-Hour Rainfall Intensity Strip & Duration Warning Banner Helpers
+    // =========================================================================
+    function renderDurationAndSixHourStrip(zone, evalData, weatherData) {
+      if (!evalData && !weatherData) return '';
+
+      const meta = zone.metadata || {};
+      const threshold = Number(meta.drainage_threshold_mm_per_hr || 30);
+      const satHours = Number(meta.saturation_hours || 2.0);
+      const riskKey = evalData ? evalData.risk_level : 'LOW';
+      const ui = RISK_UI[riskKey] || RISK_UI.LOW;
+      const isAtRisk = riskKey === 'HIGH' || riskKey === 'WATCH' || (evalData && evalData.hours_until_flood_risk !== null && evalData.hours_until_flood_risk !== undefined);
+
+      const headline = evalData?.duration_alert_headline || `Checking 6-hour rain window for ${zone.name}...`;
+      const expectedRainPill = evalData?.expected_rainfall_summary
+        || (weatherData ? `${Number(weatherData.expected_6h_total_mm || 0).toFixed(1)} mm over next 6h` : '—');
+
+      const contHrs = evalData?.continuous_rain_hours ?? weatherData?.continuous_rain_hours ?? 0;
+      const hrsToFlood = evalData?.hours_until_flood_risk;
+      const continuousWindowText = hrsToFlood !== null && hrsToFlood !== undefined
+        ? `${Number(contHrs).toFixed(1)}h sustained · Floods in ~${Number(hrsToFlood).toFixed(1)}h`
+        : `${Number(contHrs).toFixed(1)}h sustained (Limit: ${threshold} mm/hr for ${satHours}h)`;
+
+      // Merge hourly_breakdown with clock labels from weatherData.hourly_forecast
+      const rawForecast = weatherData?.hourly_forecast || [];
+      const breakdown = (evalData?.hourly_breakdown && evalData.hourly_breakdown.length === 6)
+        ? evalData.hourly_breakdown.map((item, i) => ({
+            hour_label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
+            clock_label: rawForecast[i]?.clock_label || '',
+            mm_per_hr: Number(item.mm_per_hr || 0),
+            exceeds_drain_capacity: Boolean(item.exceeds_drain_capacity),
+          }))
+        : rawForecast.slice(0, 6).map((item, i) => ({
+            hour_label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
+            clock_label: item.clock_label || '',
+            mm_per_hr: Number(item.mm_per_hr || 0),
+            exceeds_drain_capacity: Boolean(item.mm_per_hr >= threshold),
+          }));
+
+      const maxScale = Math.max(threshold * 1.35, ...breakdown.map(b => b.mm_per_hr), 10);
+
+      return `
+        <!-- Time-to-Flood Warning Banner + Stat Pills -->
+        <div id="time-to-flood-banner" class="mt-3 rounded-xl border p-3.5 ${ui.bannerBox}">
+          <div class="flex items-start gap-2.5">
+            <span class="text-base shrink-0 mt-0.5" aria-hidden="true">${isAtRisk ? '⚠️' : '✅'}</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm sm:text-base font-bold text-white leading-snug">
+                ${escapeHtml(headline)}
+              </div>
+              <div class="mt-2.5 flex flex-wrap gap-2">
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/75 border border-slate-800 text-xs">
+                  <span class="text-slate-400">Expected Rain (Next 6h):</span>
+                  <strong class="text-white">${escapeHtml(expectedRainPill)}</strong>
+                </div>
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/75 border border-slate-800 text-xs">
+                  <span class="text-slate-400">Continuous Rain Window:</span>
+                  <strong class="${isAtRisk ? 'text-amber-300' : 'text-emerald-300'}">${escapeHtml(continuousWindowText)}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6-Hour Rainfall Intensity Strip -->
+        ${
+          breakdown.length > 0
+            ? `
+          <div id="six-hour-rain-strip" class="mt-3 rounded-xl bg-slate-950/80 border border-slate-800 p-3.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+              <span class="text-xs font-semibold text-slate-200">
+                6-Hour Rainfall Intensity Forecast
+              </span>
+              <span class="text-[11px] text-slate-400">
+                Street drain limit: <strong class="text-amber-300">${threshold} mm/hr</strong> (${satHours}h saturation)
+              </span>
+            </div>
+
+            <div class="grid grid-cols-6 gap-2 items-end pt-1">
+              ${breakdown
+                .map(bar => {
+                  const pctHeight = bar.mm_per_hr <= 0
+                    ? 6
+                    : Math.max(12, Math.min(100, Math.round((bar.mm_per_hr / maxScale) * 100)));
+                  const overLimit = bar.exceeds_drain_capacity;
+                  const severeOver = bar.mm_per_hr >= threshold * 1.25;
+                  const barBg = overLimit
+                    ? (severeOver
+                        ? 'bg-gradient-to-t from-rose-600 to-rose-400 shadow-sm shadow-rose-500/30'
+                        : 'bg-gradient-to-t from-amber-500 to-amber-300 shadow-sm shadow-amber-500/30')
+                    : (bar.mm_per_hr > 2.0 ? 'bg-sky-400' : 'bg-emerald-500/75');
+                  const textTone = overLimit
+                    ? (severeOver ? 'text-rose-300 font-bold' : 'text-amber-300 font-bold')
+                    : 'text-slate-300 font-medium';
+
+                  return `
+                    <div class="flex flex-col items-center">
+                      <span class="text-[11px] ${textTone} mb-1">
+                        ${bar.mm_per_hr.toFixed(bar.mm_per_hr >= 10 ? 0 : 1)}<span class="text-[9px] font-normal opacity-80">mm</span>
+                      </span>
+                      <div class="w-full h-16 rounded-lg bg-slate-900/90 border ${
+                        overLimit ? 'border-rose-500/45' : 'border-slate-800/90'
+                      } flex items-end p-1">
+                        <div class="w-full rounded ${barBg} transition-all duration-500" style="height: ${pctHeight}%"></div>
+                      </div>
+                      <span class="text-[11px] font-semibold text-slate-200 mt-1.5">${escapeHtml(bar.hour_label)}</span>
+                      ${
+                        bar.clock_label
+                          ? `<span class="text-[10px] text-slate-500 leading-none mt-0.5">${escapeHtml(bar.clock_label)}</span>`
+                          : ''
+                      }
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          </div>
+        `
+            : ''
+        }
+      `;
+    }
 
     // =========================================================================
     // UI Renderers
@@ -885,45 +997,23 @@
       const selectedZone = state.zones[state.selectedZoneId];
       if (!selectedZone) return;
 
-      // Prefer selected zone's approved alert; otherwise show any active citywide approved alert
-      const approvedZones = state.zoneOrder
-        .map(zid => state.zones[zid])
-        .filter(z => z.approved_alert !== null);
+      const approvedAlert = selectedZone.approved_alert;
+      const latestEval = selectedZone.latest_evaluation;
 
-      const targetZone = selectedZone.approved_alert
-        ? selectedZone
-        : approvedZones.length > 0
-        ? approvedZones[0]
-        : null;
-
-      if (!targetZone) {
-        const pendingEval = selectedZone.latest_evaluation;
-        const pendingUi = pendingEval ? RISK_UI[pendingEval.risk_level] || RISK_UI.LOW : null;
+      // If neither approved nor evaluated yet, show initial loading/prompt card
+      if (!approvedAlert && !latestEval) {
         container.className = 'rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5 shadow-xl';
         container.innerHTML = `
-          <div class="flex items-start gap-3.5">
+          <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
               <svg class="w-5 h-5 text-sky-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
               </svg>
             </div>
-            <div class="flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="text-sm sm:text-base font-bold text-white">${escapeHtml(selectedZone.name)}</h3>
-                ${
-                  pendingUi
-                    ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border ${pendingUi.pillBadge}">${escapeHtml(
-                        pendingUi.shortLabel
-                      )} (Awaiting City Verification)</span>`
-                    : ''
-                }
-              </div>
-              <p class="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
-                ${
-                  pendingEval
-                    ? `Live street check complete (${pendingEval.confidence_score}% AI confidence). Once a city reviewer clicks "Approve & Send Alert", verified safety steps appear right here.`
-                    : 'Tap any neighborhood above or on the map to check live rainfall and street waterlogging.'
-                }
+            <div>
+              <h3 class="text-sm sm:text-base font-bold text-white">${escapeHtml(selectedZone.name)}</h3>
+              <p class="text-xs sm:text-sm text-slate-300 mt-0.5">
+                Fetching live 6-hour rain forecast and drainage threshold analysis...
               </p>
             </div>
           </div>
@@ -931,12 +1021,11 @@
         return;
       }
 
-      const alert = targetZone.approved_alert;
-      const ui = RISK_UI[alert.risk_level] || RISK_UI.LOW;
-      const isOpen = Boolean(state.expandedSignalZones[targetZone.id]);
-      const rainText = alert.weather
-        ? `${alert.weather.effective_rain_mm.toFixed(1)} mm/hr${alert.weather.is_simulated ? ' (heavy rain test)' : ''}`
-        : 'Live weather';
+      // Display approved alert when verified, otherwise show live forecast + pending status for the selected zone
+      const displayEval = approvedAlert || latestEval;
+      const displayWeather = approvedAlert ? approvedAlert.weather : selectedZone.weather;
+      const ui = RISK_UI[displayEval.risk_level] || RISK_UI.LOW;
+      const isOpen = Boolean(state.expandedSignalZones[selectedZone.id]);
 
       container.className = `rounded-2xl border p-4 sm:p-5 shadow-xl ${ui.cardStyle}`;
       container.innerHTML = `
@@ -945,41 +1034,58 @@
             <span class="px-2.5 py-1 rounded-full text-xs font-bold border ${ui.pillBadge}">
               ${escapeHtml(ui.shortLabel)}
             </span>
-            <h3 class="text-base sm:text-lg font-bold text-white">${escapeHtml(targetZone.name)}</h3>
-            <span class="text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full">
-              ✓ Verified Alert · ${formatTime(alert.approved_at)}
-            </span>
+            <h3 class="text-base sm:text-lg font-bold text-white">${escapeHtml(selectedZone.name)}</h3>
+            ${
+              approvedAlert
+                ? `<span class="text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full">
+                    ✓ Verified Alert · ${formatTime(approvedAlert.approved_at)}
+                  </span>`
+                : `<span class="text-xs font-medium text-amber-200 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-full">
+                    Live Forecast · Awaiting City Verification
+                  </span>`
+            }
           </div>
+          <span class="text-xs text-slate-300">
+            AI Confidence: <strong class="text-white">${displayEval.confidence_score}%</strong>
+          </span>
         </div>
 
-        <p class="text-xs sm:text-sm font-semibold text-slate-200 mt-2">
-          ${escapeHtml(ui.alertHeadline)}
-        </p>
+        ${renderDurationAndSixHourStrip(selectedZone, displayEval, displayWeather)}
 
-        <!-- Prominent Plain-English Next Steps -->
-        <div class="mt-3 rounded-xl bg-slate-950/70 border border-slate-800/90 p-3.5 sm:p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider text-sky-300 mb-2">
-            What You Should Do Next
+        ${
+          approvedAlert
+            ? `
+          <!-- Prominent Plain-English Next Steps (Published once Approved) -->
+          <div class="mt-3 rounded-xl bg-slate-950/75 border border-slate-800/90 p-3.5 sm:p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider text-sky-300 mb-2">
+              What You Should Do Next
+            </div>
+            <ul class="space-y-2">
+              ${(approvedAlert.resident_actions || [])
+                .map(
+                  step => `
+                <li class="flex items-start gap-2.5 text-sm text-white leading-snug">
+                  <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">✓</span>
+                  <span>${escapeHtml(step)}</span>
+                </li>
+              `
+                )
+                .join('')}
+            </ul>
           </div>
-          <ul class="space-y-2">
-            ${(alert.resident_actions || [])
-              .map(
-                step => `
-              <li class="flex items-start gap-2.5 text-sm text-white leading-snug">
-                <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">✓</span>
-                <span>${escapeHtml(step)}</span>
-              </li>
-            `
-              )
-              .join('')}
-          </ul>
-        </div>
+        `
+            : `
+          <p class="mt-3 text-xs text-slate-300 bg-slate-950/60 border border-slate-800/80 rounded-xl px-3.5 py-2.5">
+            Official resident safety steps appear here as soon as a city reviewer clicks <strong>Approve &amp; Send Alert</strong>.
+          </p>
+        `
+        }
 
         <!-- Clean "Why am I seeing this?" Expandable Toggle -->
         <div class="mt-3 pt-3 border-t border-slate-800/80">
           <button
             type="button"
-            onclick="toggleSignalDrawer('${targetZone.id}')"
+            onclick="toggleSignalDrawer('${selectedZone.id}')"
             class="flex items-center justify-between w-full text-left text-xs sm:text-sm font-medium text-sky-300 hover:text-sky-200 cursor-pointer"
           >
             <span>Why am I seeing this?</span>
@@ -992,23 +1098,25 @@
             <div class="mt-3 rounded-xl bg-slate-950/85 border border-slate-800 p-3.5 space-y-3">
               <div class="grid grid-cols-3 gap-2 text-xs">
                 <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
-                  <span class="text-slate-400 block text-[11px]">Rainfall Rate</span>
-                  <strong class="text-white">${escapeHtml(rainText)}</strong>
+                  <span class="text-slate-400 block text-[11px]">Current Rain Rate</span>
+                  <strong class="text-white">${
+                    displayWeather ? Number(displayWeather.current_rate_mm_hr || 0).toFixed(1) + ' mm/hr' : '—'
+                  }</strong>
                 </div>
                 <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
                   <span class="text-slate-400 block text-[11px]">Street Elevation</span>
-                  <strong class="text-white">${targetZone.metadata.elevation_m}m (${targetZone.reports.length} report${
-                  targetZone.reports.length === 1 ? '' : 's'
+                  <strong class="text-white">${selectedZone.metadata.elevation_m}m (${selectedZone.reports.length} report${
+                  selectedZone.reports.length === 1 ? '' : 's'
                 })</strong>
                 </div>
                 <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
                   <span class="text-slate-400 block text-[11px]">AI Confidence</span>
-                  <strong class="text-emerald-300">${alert.confidence_score}% calibrated</strong>
+                  <strong class="text-emerald-300">${displayEval.confidence_score}% calibrated</strong>
                 </div>
               </div>
 
               <ul class="space-y-1.5 text-xs sm:text-sm text-slate-200">
-                ${(alert.visible_signals || [])
+                ${(displayEval.visible_signals || [])
                   .map(
                     sig => `
                   <li class="flex items-start gap-2">
@@ -1099,7 +1207,7 @@
         listEl.innerHTML = `
           <div class="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center">
             <p class="text-xs sm:text-sm text-slate-400">
-              Select a neighborhood on the map to generate a live AI flood score for review.
+              Select a neighborhood on the map to generate a live 6-hour AI flood score for review.
             </p>
           </div>
         `;
@@ -1112,9 +1220,8 @@
           const ui = RISK_UI[ev.risk_level] || RISK_UI.LOW;
           const isPending = zone.review_status === 'PENDING_REVIEW';
           const isSelected = zone.id === state.selectedZoneId;
-          const rainLabel = zone.weather
-            ? `${zone.weather.effective_rain_mm.toFixed(1)} mm/hr${zone.weather.is_simulated ? ' (simulated)' : ''}`
-            : '0.0 mm/hr';
+          const nextRainSummary = ev.expected_rainfall_summary
+            || (zone.weather ? `${Number(zone.weather.expected_6h_total_mm || 0).toFixed(1)} mm in next 6h` : '0.0 mm');
 
           return `
             <div class="rounded-xl border ${
@@ -1130,7 +1237,7 @@
                     ${escapeHtml(zone.name)}
                   </button>
                   <div class="text-xs text-slate-400 mt-0.5">
-                    Rain: ${escapeHtml(rainLabel)} · ${zone.reports.length} neighbor report${
+                    ${escapeHtml(nextRainSummary)} · ${zone.reports.length} neighbor report${
             zone.reports.length === 1 ? '' : 's'
           }
                   </div>
@@ -1140,6 +1247,14 @@
                   ${escapeHtml(ui.shortLabel)}
                 </span>
               </div>
+
+              ${
+                ev.duration_alert_headline
+                  ? `<div class="text-xs font-semibold px-3 py-2 rounded-lg border ${ui.bannerBox}">
+                      ${escapeHtml(ev.duration_alert_headline)}
+                    </div>`
+                  : ''
+              }
 
               <!-- AI Confidence % -->
               <div>
@@ -1160,7 +1275,6 @@
                 ${escapeHtml(ev.responder_summary)}
               </p>
 
-              <!-- Key Signals -->
               <details class="group text-xs text-slate-300">
                 <summary class="cursor-pointer text-sky-300 hover:text-sky-200 font-medium select-none">
                   View ${(ev.visible_signals || []).length} supporting signals
@@ -1172,7 +1286,6 @@
                 </ul>
               </details>
 
-              <!-- High-Contrast Approve & Send Alert Action -->
               <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-3">
                 <span class="text-xs text-slate-400">
                   Updated ${formatTime(zone.evaluated_at)}

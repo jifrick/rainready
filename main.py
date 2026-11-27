@@ -56,26 +56,49 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 CLOUD_RUN_PROJECT = "geminisprints26blr-3834"
-GOOGLE_WEATHER_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
+GOOGLE_FORECAST_HOURS_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+SLOT_LABELS = ["Now", "+1h", "+2h", "+3h", "+4h", "+5h"]
 
-SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Flood Actionable Reasoning Engine for Kochi, Kerala.
-Given live weather telemetry (Google Weather API / Open-Meteo), 24-hour antecedent rainfall, thunderstorm probability, neighborhood elevation and drainage metadata, timestamped resident reports, and calibrated probabilities/scores from Gemini Decision 1:
-1. List exact observable signal drivers in `visible_signals` (citing exact rainfall rate in mm/hr, antecedent 24h rain / thunderstorm risk when present, zone elevation/drainage metadata, resident reports, and calibrated Decision 1 signals).
-2. Write a concise operational verification note in `responder_summary` for municipal emergency management human reviewers.
-3. Provide 2 to 3 clear, practical next steps in `resident_actions` tailored to residents and commuters in this Kochi zone (e.g., moving parked vehicles, avoiding sub-grade underpasses, clearing storm grates, or normal transit readiness).
+SYSTEM_INSTRUCTION = """You are RainReady's Hyperlocal Rainfall Intensity + Duration Flood Engine for Kochi, Kerala.
+Synthesize the 6-hour hourly rainfall forecast, pre-computed continuous rain duration & drainage threshold metrics, neighborhood terrain metadata, timestamped resident reports, and calibrated Gemini Decision 1 probabilities/scores:
+1. Populate `expected_rainfall_summary` with a crisp human-readable total (e.g., "135 mm expected over the next 3 hours" during heavy bursts, or "0.8 mm expected over the next 6 hours" when light).
+2. Populate `continuous_rain_hours` (sustained hours > 2.0 mm/hr) and `hours_until_flood_risk` (float hours until street flooding begins, or null when safe).
+3. Populate `duration_alert_headline`:
+   - When the zone is at WATCH or HIGH flood risk (or rainfall exceeds drainage thresholds / resident waterlogging is active), use this exact warning format:
+     "Flood risk in [Location] if rain continues at [X] mm/hr for [Y] hours."
+     (If resident reports already confirm active street flooding despite low forecast rain, state clearly that active waterlogging is reported in [Location] and any additional rain will worsen ponding.)
+   - When the zone is SAFE / LOW risk, write a clear, reassuring all-clear headline for [Location] (e.g., "No flood risk expected in [Location] over the next 6 hours.").
+4. Populate `hourly_breakdown` with all 6 forecast slots ("Now", "+1h", "+2h", "+3h", "+4h", "+5h") matching the provided hourly forecast rates and `exceeds_drain_capacity` flags.
+5. List exact causal drivers in `visible_signals`, write a concise verification note in `responder_summary`, and provide 2 to 3 plain-language `resident_actions` (e.g., moving parked vehicles to higher ground, avoiding underpasses).
 """
 
 
 # ---------------------------------------------------------------------------
-# Native Structured Output Schema & Request Models
+# Native Structured Output Schema & API Models
 # ---------------------------------------------------------------------------
+class HourlyBreakdownItem(BaseModel):
+    hour_label: str = Field(
+        ...,
+        description="Forecast slot label ('Now', '+1h', '+2h', '+3h', '+4h', '+5h').",
+    )
+    mm_per_hr: float = Field(
+        ...,
+        ge=0.0,
+        description="Forecast rainfall intensity in mm/hr for this hour.",
+    )
+    exceeds_drain_capacity: bool = Field(
+        ...,
+        description="True when mm_per_hr >= the zone's drainage_threshold_mm_per_hr.",
+    )
+
+
 class Stage2ActionableReasoning(BaseModel):
     visible_signals: list[str] = Field(
         ...,
         min_length=2,
         max_length=6,
-        description="Exact observable flood risk signal drivers (rainfall rate, elevation/drainage, resident reports).",
+        description="Exact observable flood risk signal drivers (rainfall rate, duration, elevation/drainage, resident reports).",
     )
     responder_summary: str = Field(
         ...,
@@ -86,6 +109,32 @@ class Stage2ActionableReasoning(BaseModel):
         min_length=2,
         max_length=3,
         description="2 to 3 clear, practical next steps in plain language for residents.",
+    )
+    expected_rainfall_summary: str = Field(
+        ...,
+        description="Concise expected rainfall summary, e.g., '135 mm expected over the next 3 hours'.",
+    )
+    continuous_rain_hours: float = Field(
+        ...,
+        ge=0.0,
+        description="Sustained consecutive hours of rain (> 2.0 mm/hr).",
+    )
+    hours_until_flood_risk: Optional[float] = Field(
+        default=None,
+        description="Estimated hours until street waterlogging/flooding occurs (e.g., 1.5 or 2.0), or null if safe.",
+    )
+    duration_alert_headline: str = Field(
+        ...,
+        description=(
+            "When at risk: 'Flood risk in [Location] if rain continues at [X] mm/hr for [Y] hours.' "
+            "When safe: clear all-clear message for [Location]."
+        ),
+    )
+    hourly_breakdown: list[HourlyBreakdownItem] = Field(
+        ...,
+        min_length=6,
+        max_length=6,
+        description="6-hour forecast breakdown (Now through +5h) for the UI intensity strip.",
     )
 
 
@@ -115,12 +164,12 @@ class ReportRequest(BaseModel):
         default=None,
         ge=0.0,
         le=500.0,
-        description="Optional active cloudburst override if enabled in UI.",
+        description="Optional active heavy-rain override if enabled in UI.",
     )
 
 
 # ---------------------------------------------------------------------------
-# 4 Kochi Neighborhood Zones (In-Memory State — Zero Static AI Responses)
+# 4 Kochi Neighborhood Zones with Drainage Thresholds & Saturation Duration
 # ---------------------------------------------------------------------------
 def _build_initial_zones() -> dict[str, dict[str, Any]]:
     return {
@@ -132,13 +181,14 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
             "lng": 76.2908,
             "metadata": {
                 "elevation_m": 1.8,
-                "drainage_capacity_mm_hr": 18,
+                "drainage_capacity_mm_hr": 25,
+                "drainage_threshold_mm_per_hr": 25.0,
+                "saturation_hours": 1.5,
                 "impervious_surface_pct": 89,
                 "canal_basin": "Perandoor Canal (180m east)",
                 "drainage_profile": (
                     "Depressed railway box-culvert underpass collecting rapid sheet runoff from "
-                    "Karshaka Road and Ernakulam South yard; gravity outfall slows sharply during "
-                    "high tide or Perandoor Canal surcharge."
+                    "Karshaka Road and Ernakulam South yard; floods if >= 25 mm/hr continues for 1.5 hours."
                 ),
             },
             "polygon": {
@@ -176,13 +226,14 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
             "lng": 76.2975,
             "metadata": {
                 "elevation_m": 2.4,
-                "drainage_capacity_mm_hr": 24,
+                "drainage_capacity_mm_hr": 30,
+                "drainage_threshold_mm_per_hr": 30.0,
+                "saturation_hours": 2.5,
                 "impervious_surface_pct": 78,
                 "canal_basin": "Thevara–Perandoor Canal (adjacent)",
                 "drainage_profile": (
                     "Reclaimed low-lying estuarine residential grid with covered slab drains along "
-                    "Main Avenue; susceptible to backwater ponding in internal cross-roads when "
-                    "Thevara-Perandoor Canal water levels rise."
+                    "Main Avenue; waterlogs if >= 30 mm/hr continues for 2.5 hours."
                 ),
             },
             "polygon": {
@@ -220,13 +271,14 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
             "lng": 76.2836,
             "metadata": {
                 "elevation_m": 2.1,
-                "drainage_capacity_mm_hr": 20,
+                "drainage_capacity_mm_hr": 35,
+                "drainage_threshold_mm_per_hr": 35.0,
+                "saturation_hours": 2.0,
                 "impervious_surface_pct": 94,
                 "canal_basin": "Mullassery Canal (250m south-west)",
                 "drainage_profile": (
                     "High-density paved commercial corridor along Kochi Metro viaduct; roadside "
-                    "box drains experience siltation and debris blockage, causing rapid curb-to-shopfront "
-                    "flooding near Padma Junction."
+                    "box drains pool if >= 35 mm/hr continues for 2.0 hours."
                 ),
             },
             "polygon": {
@@ -264,13 +316,14 @@ def _build_initial_zones() -> dict[str, dict[str, Any]]:
             "lng": 76.3083,
             "metadata": {
                 "elevation_m": 3.6,
-                "drainage_capacity_mm_hr": 28,
+                "drainage_capacity_mm_hr": 30,
+                "drainage_threshold_mm_per_hr": 30.0,
+                "saturation_hours": 2.0,
                 "impervious_surface_pct": 91,
                 "canal_basin": "Edappally Thodu (320m west)",
                 "drainage_profile": (
                     "Major national highway and flyover ramp catchment channeling heavy asphalt "
-                    "runoff into service-road drains near Lulu Mall; utility duct bottlenecks slow "
-                    "discharge toward Edappally Thodu during intense bursts."
+                    "runoff toward Edappally Thodu; floods if >= 30 mm/hr continues for 2.0 hours."
                 ),
             },
             "polygon": {
@@ -327,6 +380,15 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _format_hour_clock(hour_24: Optional[int]) -> str:
+    if hour_24 is None:
+        return ""
+    h = int(hour_24) % 24
+    suffix = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12} {suffix}"
+
+
 async def _http_get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
     if _http_client is not None:
         resp = await _http_client.get(url, params=params)
@@ -338,79 +400,225 @@ async def _http_get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
         return resp.json()
 
 
-async def _fetch_google_weather(lat: float, lng: float, weather_key: str) -> dict[str, Any]:
-    """Fetch hyperlocal live conditions from Google Maps Platform Weather API (`v1/currentConditions:lookup`)."""
+async def _fetch_google_6h_forecast(
+    lat: float, lng: float, weather_key: str
+) -> dict[str, Any]:
+    """Fetch next 6 hours from Google Maps Platform Weather API (`v1/forecast/hours:lookup`)."""
     params = {
         "key": weather_key,
         "location.latitude": lat,
         "location.longitude": lng,
+        "hours": 6,
+        "pageSize": 6,
     }
-    payload = await _http_get_json(GOOGLE_WEATHER_URL, params)
+    payload = await _http_get_json(GOOGLE_FORECAST_HOURS_URL, params)
+    forecast_hours = payload.get("forecastHours", [])[:6]
+    if not forecast_hours:
+        raise ValueError("Google Weather API returned empty forecastHours[].")
 
-    precip = payload.get("precipitation", {}) or {}
-    qpf_mm = float((precip.get("qpf") or {}).get("quantity", 0.0) or 0.0)
-    rain_prob_pct = int((precip.get("probability") or {}).get("percent", 0) or 0)
-    history = payload.get("currentConditionsHistory", {}) or {}
-    past_24h_qpf_mm = float((history.get("qpf") or {}).get("quantity", 0.0) or 0.0)
-    condition_desc = ((payload.get("weatherCondition") or {}).get("description") or {}).get(
-        "text", "Current conditions"
-    )
-    thunderstorm_prob_pct = int(payload.get("thunderstormProbability", 0) or 0)
-    humidity_pct = int(payload.get("relativeHumidity", 0) or 0)
-    temp_c = float((payload.get("temperature") or {}).get("degrees", 0.0) or 0.0)
+    hourly_records: list[dict[str, Any]] = []
+    for idx, fh in enumerate(forecast_hours):
+        disp_dt = fh.get("displayDateTime", {}) or {}
+        raw_hour = disp_dt.get("hours")
+        precip = fh.get("precipitation", {}) or {}
+        qpf_mm = float((precip.get("qpf") or {}).get("quantity", 0.0) or 0.0)
+        prob_pct = int((precip.get("probability") or {}).get("percent", 0) or 0)
+        cond_text = ((fh.get("weatherCondition") or {}).get("description") or {}).get(
+            "text", ""
+        )
+        tstorm_pct = int(fh.get("thunderstormProbability", 0) or 0)
 
+        hourly_records.append(
+            {
+                "slot_index": idx,
+                "hour_label": SLOT_LABELS[idx] if idx < len(SLOT_LABELS) else f"+{idx}h",
+                "display_hour": int(raw_hour) if raw_hour is not None else None,
+                "clock_label": _format_hour_clock(raw_hour),
+                "mm_per_hr": round(qpf_mm, 2),
+                "probability_pct": prob_pct,
+                "thunderstorm_probability_pct": tstorm_pct,
+                "condition_text": cond_text,
+            }
+        )
+
+    first = hourly_records[0]
     return {
-        "observed_precipitation_mm": round(qpf_mm, 2),
-        "observed_rain_mm": round(qpf_mm, 2),
-        "past_24h_rain_mm": round(past_24h_qpf_mm, 2),
-        "rain_probability_pct": rain_prob_pct,
-        "thunderstorm_probability_pct": thunderstorm_prob_pct,
-        "relative_humidity_pct": humidity_pct,
-        "condition_text": condition_desc,
-        "temperature_c": round(temp_c, 1),
-        "unit": "mm",
-        "observation_time": payload.get("currentTime"),
-        "source": "Google Maps Platform Weather API",
+        "hourly_records": hourly_records,
+        "condition_text": first.get("condition_text") or "Live forecast",
+        "thunderstorm_probability_pct": first.get("thunderstorm_probability_pct", 0),
+        "observation_time": (forecast_hours[0].get("interval") or {}).get("startTime"),
+        "source": "Google Maps Platform Weather API (6h Forecast)",
     }
 
 
-async def _fetch_open_meteo(lat: float, lng: float) -> dict[str, Any]:
-    """Fallback live precipitation (current=precipitation,rain) from Open-Meteo."""
+async def _fetch_open_meteo_6h_forecast(lat: float, lng: float) -> dict[str, Any]:
+    """Automatic 6-hour fallback using Open-Meteo (`hourly=precipitation,precipitation_probability&forecast_hours=6`)."""
     params = {
         "latitude": lat,
         "longitude": lng,
-        "current": "precipitation,rain",
+        "hourly": "precipitation,precipitation_probability",
+        "forecast_hours": 6,
+        "timezone": "Asia/Kolkata",
     }
     payload = await _http_get_json(OPEN_METEO_URL, params)
+    hourly = payload.get("hourly", {}) or {}
+    times = hourly.get("time", [])[:6]
+    precips = hourly.get("precipitation", [])[:6]
+    probs = hourly.get("precipitation_probability", [])[:6]
 
-    current = payload.get("current", {})
-    units = payload.get("current_units", {})
+    hourly_records: list[dict[str, Any]] = []
+    for idx in range(min(6, len(precips))):
+        iso_str = times[idx] if idx < len(times) else ""
+        disp_hr: Optional[int] = None
+        if "T" in iso_str:
+            try:
+                disp_hr = int(iso_str.split("T")[1].split(":")[0])
+            except (ValueError, IndexError):
+                disp_hr = None
+
+        hourly_records.append(
+            {
+                "slot_index": idx,
+                "hour_label": SLOT_LABELS[idx] if idx < len(SLOT_LABELS) else f"+{idx}h",
+                "display_hour": disp_hr,
+                "clock_label": _format_hour_clock(disp_hr),
+                "mm_per_hr": round(float(precips[idx] or 0.0), 2),
+                "probability_pct": int(probs[idx] or 0) if idx < len(probs) else 0,
+                "thunderstorm_probability_pct": 0,
+                "condition_text": "Open-Meteo Forecast",
+            }
+        )
+
     return {
-        "observed_precipitation_mm": float(current.get("precipitation", 0.0) or 0.0),
-        "observed_rain_mm": float(current.get("rain", 0.0) or 0.0),
-        "unit": units.get("precipitation", "mm"),
-        "observation_time": current.get("time"),
-        "source": "Open-Meteo Live API",
+        "hourly_records": hourly_records,
+        "condition_text": "Open-Meteo Hourly Forecast",
+        "thunderstorm_probability_pct": 0,
+        "observation_time": times[0] if times else _utc_now_iso(),
+        "source": "Open-Meteo Live 6h Forecast",
     }
 
 
-async def _fetch_live_weather(lat: float, lng: float) -> dict[str, Any]:
-    """Use Google Weather API when GOOGLE_WEATHER_API_KEY is present; fall back to Open-Meteo."""
+async def _fetch_live_6h_forecast(lat: float, lng: float) -> dict[str, Any]:
+    """Primary: Google Weather API 6-hour forecast; Fallback: Open-Meteo 6-hour forecast."""
     load_dotenv(override=True)
     weather_key = os.environ.get("GOOGLE_WEATHER_API_KEY", "").strip()
     if weather_key:
         try:
-            return await _fetch_google_weather(lat, lng, weather_key)
-        except httpx.HTTPError as exc:
-            logger.warning("Google Weather API error (%s); falling back to Open-Meteo.", exc)
-    return await _fetch_open_meteo(lat, lng)
+            return await _fetch_google_6h_forecast(lat, lng, weather_key)
+        except Exception as exc:
+            logger.warning("Google 6h Forecast API error (%s); falling back to Open-Meteo.", exc)
+    return await _fetch_open_meteo_6h_forecast(lat, lng)
 
 
-def _build_zone_input(
+def _compute_rain_and_duration_metrics(
     zone: dict[str, Any],
-    weather: dict[str, Any],
+    base_forecast: dict[str, Any],
     simulated_rain_mm: Optional[float],
-) -> str:
+) -> dict[str, Any]:
+    """Apply optional 3-hour continuous storm injection and pre-compute duration flood metrics."""
+    meta = zone["metadata"]
+    threshold_mm = float(meta["drainage_threshold_mm_per_hr"])
+    sat_hours = float(meta["saturation_hours"])
+
+    raw_hours = copy.deepcopy(base_forecast.get("hourly_records", []))
+    while len(raw_hours) < 6:
+        idx = len(raw_hours)
+        raw_hours.append(
+            {
+                "slot_index": idx,
+                "hour_label": SLOT_LABELS[idx],
+                "display_hour": None,
+                "clock_label": "",
+                "mm_per_hr": 0.0,
+                "probability_pct": 0,
+                "thunderstorm_probability_pct": 0,
+                "condition_text": "Forecast",
+            }
+        )
+
+    live_baseline_now_mm = float(raw_hours[0]["mm_per_hr"])
+
+    # When Test Heavy Rain (45mm/hr) is toggled on, inject a simulated 3-hour continuous 45 mm/hr storm
+    if simulated_rain_mm is not None:
+        sim_val = round(float(simulated_rain_mm), 2)
+        for i in range(min(3, len(raw_hours))):
+            raw_hours[i]["mm_per_hr"] = sim_val
+            raw_hours[i]["probability_pct"] = max(int(raw_hours[i].get("probability_pct", 0)), 95)
+            raw_hours[i]["condition_text"] = "Simulated Heavy Cloudburst"
+
+    # Annotate each hour against this neighborhood's drainage threshold
+    for h in raw_hours:
+        h["exceeds_drain_capacity"] = bool(float(h["mm_per_hr"]) >= threshold_mm)
+
+    current_rate_mm_hr = round(float(raw_hours[0]["mm_per_hr"]), 2)
+    expected_6h_total_mm = round(sum(float(h["mm_per_hr"]) for h in raw_hours), 2)
+    expected_3h_total_mm = round(sum(float(h["mm_per_hr"]) for h in raw_hours[:3]), 2)
+
+    # Longest consecutive window > 2.0 mm/hr across the 6-hour forecast
+    max_continuous = 0
+    curr_streak = 0
+    for h in raw_hours:
+        if float(h["mm_per_hr"]) > 2.0:
+            curr_streak += 1
+            max_continuous = max(max_continuous, curr_streak)
+        else:
+            curr_streak = 0
+    continuous_rain_hours = float(max_continuous)
+
+    # Consecutive hours >= zone's drainage threshold
+    max_exceed_streak = 0
+    exceed_rates: list[float] = []
+    curr_ex = 0
+    curr_rates: list[float] = []
+    for h in raw_hours:
+        rate = float(h["mm_per_hr"])
+        if rate >= threshold_mm:
+            curr_ex += 1
+            curr_rates.append(rate)
+            if curr_ex > max_exceed_streak:
+                max_exceed_streak = curr_ex
+                exceed_rates = list(curr_rates)
+        else:
+            curr_ex = 0
+            curr_rates = []
+
+    # Estimate hours to flood from zone drainage capacity & saturation duration
+    # Required saturation volume ~ threshold_mm * saturation_hours
+    estimated_hours_to_flood: Optional[float] = None
+    saturation_volume_mm = threshold_mm * sat_hours
+    if max_exceed_streak > 0 and exceed_rates:
+        avg_exceed_rate = sum(exceed_rates) / len(exceed_rates)
+        storm_volume_mm = avg_exceed_rate * max_exceed_streak
+        if max_exceed_streak >= sat_hours or storm_volume_mm >= (saturation_volume_mm * 0.85):
+            # Higher rainfall intensity saturates storm drains proportionally faster, bounded cleanly
+            est = sat_hours * (threshold_mm / max(avg_exceed_rate, threshold_mm))
+            estimated_hours_to_flood = round(max(0.5, min(sat_hours, est)), 1)
+
+    return {
+        "observed_precipitation_mm": live_baseline_now_mm,
+        "observed_rain_mm": live_baseline_now_mm,
+        "current_rate_mm_hr": current_rate_mm_hr,
+        "effective_rain_mm": current_rate_mm_hr,
+        "expected_3h_total_mm": expected_3h_total_mm,
+        "expected_6h_total_mm": expected_6h_total_mm,
+        "continuous_rain_hours": continuous_rain_hours,
+        "sustained_over_threshold_hours": float(max_exceed_streak),
+        "estimated_hours_to_flood": estimated_hours_to_flood,
+        "drainage_threshold_mm_per_hr": threshold_mm,
+        "saturation_hours": sat_hours,
+        "hourly_forecast": raw_hours,
+        "condition_text": raw_hours[0].get("condition_text") or base_forecast.get("condition_text"),
+        "thunderstorm_probability_pct": base_forecast.get("thunderstorm_probability_pct", 0),
+        "simulated_rain_mm": simulated_rain_mm,
+        "is_simulated": simulated_rain_mm is not None,
+        "unit": "mm",
+        "observation_time": base_forecast.get("observation_time"),
+        "source": base_forecast.get("source", "Google Maps Platform Weather API"),
+        "fetched_at": _utc_now_iso(),
+    }
+
+
+def _build_zone_input(zone: dict[str, Any], weather: dict[str, Any]) -> str:
     meta = zone["metadata"]
     reports = zone["reports"]
 
@@ -422,39 +630,42 @@ def _build_zone_input(
     else:
         formatted_reports = "  - None reported in this zone yet."
 
-    extra_meteo = ""
-    if "past_24h_rain_mm" in weather:
-        extra_meteo = (
-            f"\nSky Condition: {weather.get('condition_text', 'N/A')} | "
-            f"Rain Probability: {weather.get('rain_probability_pct', 0)}% | "
-            f"Thunderstorm Probability: {weather.get('thunderstorm_probability_pct', 0)}% | "
-            f"24-Hour Antecedent Rainfall Accumulation: {weather.get('past_24h_rain_mm', 0.0):.2f} mm | "
-            f"Humidity: {weather.get('relative_humidity_pct', 0)}%"
-        )
-
-    rain_mode = (
-        f"ACTIVE CLOUDBURST OVERRIDE: {simulated_rain_mm:.1f} mm/hr simulated rainfall "
-        f"(Live {weather['source']} baseline: {weather['observed_precipitation_mm']:.2f} mm). "
-        f"Evaluate {simulated_rain_mm:.1f} mm/hr as the current live rainfall intensity.{extra_meteo}"
-        if simulated_rain_mm is not None
-        else (
-            f"LIVE {weather['source'].upper()} TELEMETRY: current precipitation={weather['observed_precipitation_mm']:.2f} mm "
-            f"(observed at {weather.get('observation_time', 'now')}).{extra_meteo}"
-        )
+    hourly_lines = "\n".join(
+        f"  - {h['hour_label']} ({h.get('clock_label') or 'forecast'}): "
+        f"{h['mm_per_hr']:.2f} mm/hr | rain_prob={h['probability_pct']}% | "
+        f"exceeds_drain_capacity={h['exceeds_drain_capacity']}"
+        for h in weather["hourly_forecast"]
     )
 
-    return f"""KOCHI HYPERLOCAL FLOOD TELEMETRY
-Zone: {zone['name']} ({zone['subtitle']}) [id={zone['id']}]
+    sim_banner = (
+        f"SIMULATED 3-HOUR CONTINUOUS STORM ACTIVE: {weather['simulated_rain_mm']:.1f} mm/hr "
+        f"injected across Now, +1h, +2h (Live baseline Now was {weather['observed_precipitation_mm']:.2f} mm/hr)."
+        if weather["is_simulated"]
+        else f"LIVE FORECAST TELEMETRY ({weather['source']})."
+    )
+
+    return f"""KOCHI HYPERLOCAL RAINFALL INTENSITY + DURATION TELEMETRY
+Location / Zone Name: {zone['name']} ({zone['subtitle']}) [id={zone['id']}]
 Coordinates: {zone['lat']}, {zone['lng']}
 Baseline Elevation: {meta['elevation_m']}m above MSL
-Storm Drainage Design Capacity: ~{meta['drainage_capacity_mm_hr']} mm/hr
+Drainage Threshold: {meta['drainage_threshold_mm_per_hr']} mm/hr
+Saturation Window: Floods if >= {meta['drainage_threshold_mm_per_hr']} mm/hr continues for {meta['saturation_hours']} hours
 Impervious Surface Coverage: {meta['impervious_surface_pct']}%
 Canal / Outfall Basin: {meta['canal_basin']}
-Terrain & Drainage Metadata: {meta['drainage_profile']}
+Terrain & Drainage Notes: {meta['drainage_profile']}
 
-WEATHER SIGNAL:
-{rain_mode}
-Effective Rainfall Rate: {weather['effective_rain_mm']:.2f} mm/hr
+6-HOUR FORECAST & PRE-COMPUTED DURATION METRICS:
+- Mode: {sim_banner}
+- current_rate_mm_hr: {weather['current_rate_mm_hr']:.2f} mm/hr
+- expected_3h_total_mm: {weather['expected_3h_total_mm']:.2f} mm
+- expected_6h_total_mm: {weather['expected_6h_total_mm']:.2f} mm
+- continuous_rain_hours (> 2.0 mm/hr): {weather['continuous_rain_hours']:.1f} hours
+- consecutive_hours_exceeding_threshold: {weather['sustained_over_threshold_hours']:.1f} hours
+- estimated_hours_to_flood: {weather['estimated_hours_to_flood']}
+- Thunderstorm Probability: {weather.get('thunderstorm_probability_pct', 0)}%
+
+NEXT 6 HOURS BREAKDOWN:
+{hourly_lines}
 
 RESIDENT WATERLOGGING REPORTS ({len(reports)} total):
 {formatted_reports}"""
@@ -484,34 +695,35 @@ async def _run_stage1_decision_gate(
         questions={
             "escalate_alert": {
                 "type": "noul",
-                "instructions": "Should this zone trigger a flood watch or warning?",
+                "instructions": "Should this zone trigger a flood watch or warning based on forecast rainfall intensity, sustained duration, and resident reports?",
             },
             "risk_level": {
                 "type": "choice",
-                "instructions": "Classify the flood risk level for this Kochi neighborhood zone right now.",
+                "instructions": "Classify the flood risk level for this Kochi neighborhood over the current and upcoming 6-hour rainfall window.",
                 "criteria": {
                     "high_danger": (
-                        "Heavy rainfall or cloudburst (>=30mm/hr), knee-deep waterlogging reports, "
-                        "or severe sub-grade underpass/canal surcharge."
+                        "Sustained heavy rain exceeding the zone's drainage threshold across its saturation window, "
+                        "active >=30mm/hr cloudburst, or knee-deep resident waterlogging reports."
                     ),
                     "low_risk": (
-                        "Dry or light rainfall well within storm drainage capacity and no hazardous waterlogging reports."
+                        "Dry or light rainfall safely below the street's drainage threshold with no hazardous waterlogging reports."
                     ),
                     "other": (
                         "Ambiguous, contradictory, or unreadable sensor/report input requiring manual review."
                     ),
                     "watch_level": (
-                        "Moderate rainfall, blocked drain report, ankle-deep waterlogging, or rising canal backwater."
+                        "Moderate sustained rain approaching the drainage threshold, short burst near threshold, "
+                        "blocked drain report, or ankle-deep curb ponding."
                     ),
                 },
             },
             "severity_score": {
                 "type": "score",
-                "instructions": "Rate waterlogging severity across 3 ordered levels from minor pooling to severe waterlogging.",
+                "instructions": "Rate expected street waterlogging severity across 3 ordered levels from minor pooling to severe waterlogging.",
                 "criteria": [
-                    "No flooding or minor surface dampness; storm drains flowing freely.",
-                    "Localized curb/ankle-deep pooling or partial drain blockage requiring caution.",
-                    "Severe knee-deep or impassable street waterlogging exceeding drainage capacity.",
+                    "No flooding or minor surface dampness; storm drains flowing well within capacity.",
+                    "Localized curb/ankle-deep pooling, partial drain blockage, or runoff nearing capacity.",
+                    "Severe knee-deep or impassable street waterlogging from sustained over-threshold rain.",
                 ],
             },
         },
@@ -562,10 +774,13 @@ async def _run_stage1_decision_gate(
 
 async def _run_stage2_neon_reasoning(
     v1_client: genai.Client,
+    zone: dict[str, Any],
+    weather: dict[str, Any],
     shared_input: str,
     stage1_gate: dict[str, Any],
 ) -> tuple[Stage2ActionableReasoning, dict[str, Any], Optional[str]]:
-    """Stage 2 — Actionable Reasoning (`gemini-4-neon` on `client.interactions.create` with `thinking_level="medium"`)."""
+    """Stage 2 — Actionable Duration & Forecast Reasoning (`gemini-4-neon`, `thinking_level="medium"`)."""
+    meta = zone["metadata"]
     stage2_prompt = f"""{shared_input}
 
 STAGE 1 GEMINI DECISION 1 CALIBRATED PROBABILITIES & SCORES:
@@ -574,7 +789,12 @@ STAGE 1 GEMINI DECISION 1 CALIBRATED PROBABILITIES & SCORES:
 - risk_level choice probabilities: {stage1_gate['risk_choice_probabilities']}
 - severity_score (0.00 minor pooling to 2.00 severe waterlogging): {stage1_gate['severity_score']:.4f} / 2.00
 
-Generate `visible_signals`, `responder_summary`, and `resident_actions` consistent with these calibrated signals."""
+HEADLINE & DURATION INSTRUCTIONS FOR {zone['name']}:
+- Street drainage threshold: {meta['drainage_threshold_mm_per_hr']} mm/hr; floods if sustained for {meta['saturation_hours']} hours.
+- Pre-computed estimated_hours_to_flood: {weather['estimated_hours_to_flood']}.
+- If risk_level is WATCH or HIGH and forecast rainfall meets/exceeds threshold, format `duration_alert_headline` strictly as:
+  "Flood risk in {zone['name']} if rain continues at [X] mm/hr for [Y] hours."
+- Ensure `hourly_breakdown` contains all 6 entries ("Now", "+1h", "+2h", "+3h", "+4h", "+5h") matching the 6-hour forecast."""
 
     response_schema = Stage2ActionableReasoning.model_json_schema()
     neon_model = MODEL_IDS["frontier_fast"]
@@ -639,41 +859,42 @@ async def _evaluate_zone(
     async with ZONE_LOCKS[zone_id]:
         zone = ZONES[zone_id]
 
-        # 1. Fetch live weather (Google Weather API primary, Open-Meteo fallback)
+        # 1. Fetch live 6-hour forecast (Google Weather API primary, Open-Meteo fallback)
         try:
-            live_weather = await _fetch_live_weather(zone["lat"], zone["lng"])
-        except httpx.HTTPError as exc:
-            logger.warning("Weather fetch error for %s: %s", zone_id, exc)
+            base_forecast = await _fetch_live_6h_forecast(zone["lat"], zone["lng"])
+        except Exception as exc:
+            logger.warning("6h forecast fetch error for %s: %s", zone_id, exc)
             if simulated_rain_mm is None:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to fetch live weather telemetry: {exc}",
+                    detail=f"Failed to fetch live 6-hour weather forecast: {exc}",
                 ) from exc
-            live_weather = {
-                "observed_precipitation_mm": 0.0,
-                "observed_rain_mm": 0.0,
-                "unit": "mm",
+            base_forecast = {
+                "hourly_records": [
+                    {
+                        "slot_index": i,
+                        "hour_label": SLOT_LABELS[i],
+                        "display_hour": None,
+                        "clock_label": "",
+                        "mm_per_hr": 0.0,
+                        "probability_pct": 0,
+                        "thunderstorm_probability_pct": 0,
+                        "condition_text": "Simulated Override",
+                    }
+                    for i in range(6)
+                ],
+                "condition_text": "Simulated Heavy Rain Override",
+                "thunderstorm_probability_pct": 0,
                 "observation_time": _utc_now_iso(),
-                "source": "Weather API Unreachable (Using Heavy Rain Override)",
+                "source": "Weather API Unreachable (Using 3h Storm Override)",
             }
 
-        effective_rain = (
-            float(simulated_rain_mm)
-            if simulated_rain_mm is not None
-            else max(
-                live_weather["observed_precipitation_mm"],
-                live_weather["observed_rain_mm"],
-            )
+        weather_snapshot = _compute_rain_and_duration_metrics(
+            zone=zone,
+            base_forecast=base_forecast,
+            simulated_rain_mm=simulated_rain_mm,
         )
-        weather_snapshot = {
-            **live_weather,
-            "simulated_rain_mm": simulated_rain_mm,
-            "is_simulated": simulated_rain_mm is not None,
-            "effective_rain_mm": effective_rain,
-            "fetched_at": _utc_now_iso(),
-        }
-
-        shared_input = _build_zone_input(zone, weather_snapshot, simulated_rain_mm)
+        shared_input = _build_zone_input(zone, weather_snapshot)
 
         # 2. Stage 1 — Fast Calibration Gate (gemini-decision-1)
         try:
@@ -685,9 +906,11 @@ async def _evaluate_zone(
                 detail=f"Live Gemini Decision 1 API call failed: {exc}",
             ) from exc
 
-        # 3. Stage 2 — Actionable Reasoning (gemini-4-neon, thinking_level="medium")
+        # 3. Stage 2 — Actionable Reasoning + Duration Headline (gemini-4-neon, thinking_level="medium")
         stage2_reasoning, routing_meta, interaction_id = await _run_stage2_neon_reasoning(
             v1_client=v1_client,
+            zone=zone,
+            weather=weather_snapshot,
             shared_input=shared_input,
             stage1_gate=stage1_gate,
         )
@@ -728,12 +951,12 @@ async def _evaluate_zone(
 # FastAPI App & Routes
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="RainReady — Kochi Hyperlocal Flood Alert Engine",
+    title="RainReady — Kochi Rainfall Intensity + Duration Flood Engine",
     description=(
-        "Two-stage live flood alert workflow pairing Google Weather API + Gemini Decision 1 "
-        "with Gemini 4 Neon (thinking_level='medium') for Google Cloud Run."
+        "6-hour Google Maps Platform Weather API forecast + neighborhood drainage threshold "
+        "duration engine powered by Gemini Decision 1 and Gemini 4 Neon."
     ),
-    version="2.2.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -760,7 +983,11 @@ async def health_check() -> dict[str, Any]:
             "stage2_reasoning": MODEL_IDS["frontier_fast"],
             "thinking_level": "medium",
         },
-        "weather_provider": "Google Maps Platform Weather API" if has_weather_key else "Open-Meteo Live API",
+        "weather_provider": (
+            "Google Maps Platform Weather API (6h Forecast)"
+            if has_weather_key
+            else "Open-Meteo Live 6h Forecast"
+        ),
         "gemini_key_configured": has_gemini_key,
         "google_weather_key_configured": has_weather_key,
     }
