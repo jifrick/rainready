@@ -2,11 +2,19 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RainReady — Street-level flood alerts for Kochi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>RainReady — Live Kochi Flood Intelligence</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" href="/static/logo.png" />
   <link rel="apple-touch-icon" href="/static/logo.png" />
+
+  <!-- Google Fonts: Plus Jakarta Sans (600,700,800), Inter (400,500,600), JetBrains Mono (500,700) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+    rel="stylesheet"
+  />
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -16,17 +24,17 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+            display: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
           },
-        }
-      }
+          colors: {
+            obsidian: '#070B14',
+          },
+        },
+      },
     };
   </script>
-
-  <!-- Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <!-- Leaflet.js CSS & JS -->
   <link
@@ -42,353 +50,487 @@
   ></script>
 
   <style>
-    body {
-      background-color: #090e17;
-      color: #f1f5f9;
+    :root {
+      --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
     }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #070B14;
+      color: #F8FAFC;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Smoked-Glass Surface System */
+    .glass-surface {
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(22px) saturate(165%);
+      -webkit-backdrop-filter: blur(22px) saturate(165%);
+      border: 1px solid rgba(255, 255, 255, 0.085);
+      box-shadow:
+        0 24px 48px -12px rgba(2, 6, 23, 0.78),
+        inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    }
+
+    .glass-pill {
+      background: rgba(11, 17, 30, 0.82);
+      backdrop-filter: blur(20px) saturate(160%);
+      -webkit-backdrop-filter: blur(20px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 28px -8px rgba(2, 6, 23, 0.65);
+      transition: all 200ms var(--ease-spring);
+    }
+
+    .glass-pill:hover {
+      border-color: rgba(255, 255, 255, 0.16);
+      transform: translateY(-1px);
+    }
+
+    /* Semantic Status Ambient Glows */
+    .glow-safe {
+      box-shadow: 0 0 28px -4px rgba(16, 185, 129, 0.22), 0 24px 48px -12px rgba(2, 6, 23, 0.8);
+      border-color: rgba(16, 185, 129, 0.28);
+    }
+    .glow-watch {
+      box-shadow: 0 0 32px -4px rgba(245, 158, 11, 0.26), 0 24px 48px -12px rgba(2, 6, 23, 0.8);
+      border-color: rgba(245, 158, 11, 0.34);
+    }
+    .glow-high {
+      box-shadow: 0 0 36px -4px rgba(239, 68, 68, 0.32), 0 24px 48px -12px rgba(2, 6, 23, 0.82);
+      border-color: rgba(239, 68, 68, 0.42);
+    }
+
+    /* Dark-Matter Obsidian Street Map Calibration (Zero Watermarks, Crisp Kochi Streets) */
     .leaflet-container {
-      background: #e2e8f0 !important;
+      background: #070B14 !important;
       font-family: 'Inter', sans-serif;
     }
     .leaflet-tile-pane {
-      filter: brightness(0.96) contrast(1.03);
+      filter: invert(100%) hue-rotate(188deg) brightness(86%) contrast(104%) saturate(68%);
     }
-    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-      background: #0f172a !important;
-      color: #f8fafc !important;
-      border: 1px solid #334155;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45);
+
+    /* Bespoke Dark Glass Leaflet Controls & Tooltips */
+    .leaflet-control-zoom {
+      border: 1px solid rgba(255, 255, 255, 0.09) !important;
+      border-radius: 14px !important;
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55) !important;
     }
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+    .leaflet-control-zoom a {
+      background: rgba(15, 23, 42, 0.84) !important;
+      backdrop-filter: blur(16px);
+      color: #E2E8F0 !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      width: 34px !important;
+      height: 34px !important;
+      line-height: 34px !important;
+      transition: background 200ms var(--ease-spring);
     }
-    ::-webkit-scrollbar-track {
-      background: #090e17;
+    .leaflet-control-zoom a:hover {
+      background: rgba(30, 41, 59, 0.95) !important;
+      color: #38BDF8 !important;
     }
-    ::-webkit-scrollbar-thumb {
-      background: #1e293b;
+    .leaflet-control-attribution {
+      background: rgba(7, 11, 20, 0.65) !important;
+      color: rgba(148, 163, 184, 0.7) !important;
+      font-size: 10px !important;
+      backdrop-filter: blur(8px);
+      border-radius: 8px 0 0 0;
+      padding: 2px 8px !important;
+    }
+    .leaflet-control-attribution a {
+      color: rgba(148, 163, 184, 0.9) !important;
+    }
+    .leaflet-tooltip {
+      background: rgba(11, 17, 30, 0.92) !important;
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      color: #F8FAFC !important;
+      border-radius: 10px !important;
+      padding: 6px 10px !important;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.55) !important;
+    }
+    .leaflet-tooltip-top:before {
+      border-top-color: rgba(11, 17, 30, 0.92) !important;
+    }
+
+    /* Pulsing Radar Map Markers for Active Flood Warnings */
+    @keyframes radar-pulse {
+      0% {
+        transform: scale(0.85);
+        opacity: 0.85;
+      }
+      75%, 100% {
+        transform: scale(2.6);
+        opacity: 0;
+      }
+    }
+    .pulse-ring {
+      animation: radar-pulse 2.1s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    }
+
+    /* Smooth Transition Helper */
+    .spring-transition {
+      transition: all 220ms var(--ease-spring);
+    }
+
+    /* Subtle Scrollbars */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .thin-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .thin-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .thin-scroll::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.22);
       border-radius: 9999px;
     }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #334155;
+    .thin-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.4);
     }
   </style>
 </head>
-<body class="min-h-screen flex flex-col antialiased selection:bg-sky-500/30 selection:text-sky-100">
+<body class="relative w-screen h-screen overflow-hidden select-none sm:select-auto">
 
-  <!-- Calm, Everyday-Language Top Header -->
-  <header class="border-b border-slate-800/80 bg-slate-950/95 backdrop-blur-md">
-    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-3 min-w-0">
-        <img
-          src="/static/logo.png"
-          alt="RainReady"
-          class="w-11 h-11 rounded-xl object-cover border border-sky-500/30 shadow-lg shadow-sky-500/20 shrink-0"
-        />
-        <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white">RainReady</h1>
-            <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/25">
-              Kochi
-            </span>
-          </div>
-          <p class="text-xs sm:text-sm text-slate-300 truncate sm:whitespace-normal">
-            Street-level flood alerts that tell you what to do next.
-          </p>
+  <!-- ===================================================================== -->
+  <!-- 1. FULL-BLEED LIVING MAP CANVAS (100vw x 100vh)                       -->
+  <!-- ===================================================================== -->
+  <div id="kochi-map" class="fixed inset-0 w-screen h-screen z-0"></div>
+
+  <!-- Subtle Top Vignette so Floating HUD Pills Pop Against Any Zoom Level -->
+  <div
+    class="pointer-events-none fixed inset-x-0 top-0 h-36 z-10"
+    style="background: linear-gradient(180deg, rgba(7,11,20,0.78) 0%, rgba(7,11,20,0.28) 58%, rgba(7,11,20,0) 100%);"
+  ></div>
+
+  <!-- ===================================================================== -->
+  <!-- 2. FLOATING TOP HUD: PILL HEADER + HORIZONTAL ZONE SELECTOR STRIP     -->
+  <!-- ===================================================================== -->
+  <header class="pointer-events-none fixed inset-x-0 top-0 z-30 px-3 sm:px-5 pt-3 sm:pt-4 flex flex-col gap-2.5">
+    <!-- Top Floating Glass Pill Bar -->
+    <div class="w-full max-w-[1400px] mx-auto flex items-center justify-between gap-2">
+
+      <!-- Brand Pill with Custom Inline SVG RainReady Raindrop-Pin Logo -->
+      <div class="pointer-events-auto glass-surface rounded-full pl-2.5 pr-3.5 py-1.5 flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400/20 via-blue-500/20 to-rose-500/20 border border-white/10 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="rrDropGrad" x1="6" y1="3" x2="26" y2="29" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#38BDF8" />
+                <stop offset="55%" stop-color="#2563EB" />
+                <stop offset="100%" stop-color="#F97316" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M16 3C16 3 6.5 13.4 6.5 19.6C6.5 24.85 10.75 29 16 29C21.25 29 25.5 24.85 25.5 19.6C25.5 13.4 16 3 16 3Z"
+              fill="url(#rrDropGrad)"
+            />
+            <circle cx="16" cy="19.5" r="3.4" fill="#070B14" />
+            <path d="M11.5 16.8C12.6 15.2 14.2 14.3 16 14.3C17.8 14.3 19.4 15.2 20.5 16.8" stroke="#F8FAFC" stroke-width="1.6" stroke-linecap="round" opacity="0.9" />
+          </svg>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+          <span class="font-display font-extrabold text-sm sm:text-base tracking-tight text-white">
+            RainReady
+          </span>
+          <span class="hidden sm:inline-block h-3.5 w-px bg-white/10"></span>
+          <span class="hidden md:inline-flex items-center gap-1.5 text-xs font-medium text-slate-300">
+            <span id="telemetry-dot" class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+            <span id="telemetry-label">Live Kochi Telemetry</span>
+          </span>
         </div>
       </div>
 
-      <!-- Subtle Status Dot & Optional Guide Restore / Reset -->
-      <div class="flex items-center gap-2.5 shrink-0">
-        <button
-          id="show-guide-btn"
-          type="button"
-          onclick="toggleGuide(true)"
-          class="hidden text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-lg hover:bg-slate-900 transition cursor-pointer"
-        >
-          How it works
-        </button>
+      <!-- Right Side: Segmented Mode Toggle (Resident Map / City Reviewer) + Subtle Reset -->
+      <div class="pointer-events-auto flex items-center gap-2">
+        <div class="glass-surface rounded-full p-1 flex items-center gap-1">
+          <button
+            id="mode-resident-btn"
+            type="button"
+            onclick="setViewMode('resident')"
+            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm"
+          >
+            Resident Map
+          </button>
+          <button
+            id="mode-reviewer-btn"
+            type="button"
+            onclick="setViewMode('reviewer')"
+            class="px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5"
+          >
+            <span>City Reviewer</span>
+            <span
+              id="pending-badge"
+              class="hidden font-mono tabular-nums text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 shadow-[0_0_12px_rgba(245,158,11,0.65)]"
+            >
+              0
+            </span>
+          </button>
+        </div>
+
         <button
           id="reset-demo-btn"
           type="button"
-          title="Reset reports and alerts"
-          class="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-800 transition cursor-pointer"
+          title="Reset live demo state"
+          class="glass-pill rounded-full w-9 h-9 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
         >
-          Reset
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
         </button>
-        <span
-          id="status-dot"
-          title="Checking live flood alert service..."
-          class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"
-        ></span>
       </div>
     </div>
 
-    <!-- Compact & Dismissible 3-Step Quick Guide Strip -->
-    <div id="quick-guide-strip" class="border-t border-slate-800/80 bg-slate-900/70">
-      <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-2.5 flex items-start sm:items-center justify-between gap-3">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-5 text-xs flex-1">
-          <div class="flex items-center gap-2 text-slate-200">
-            <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold text-[11px] flex items-center justify-center shrink-0">1</span>
-            <span><strong class="text-white">Check Your Street:</strong> Tap a neighborhood to see live flood risk.</span>
+    <!-- Floating Horizontal Zone Selector Strip -->
+    <div class="w-full max-w-[1400px] mx-auto">
+      <div id="zone-strip" class="pointer-events-auto flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+
+    <!-- Non-Intrusive Floating Toast / Error Notice -->
+    <div id="toast-banner" class="hidden pointer-events-auto mx-auto max-w-md glass-surface rounded-full px-4 py-2 text-xs text-slate-100 flex items-center gap-2.5 border-sky-400/30">
+      <span id="toast-dot" class="w-2 h-2 rounded-full bg-sky-400 shrink-0"></span>
+      <span id="toast-msg" class="truncate"></span>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- 3. RESIDENT INSPECTOR: FLOATING GLASS CARD (DESKTOP) / SHEET (MOBILE) -->
+  <!-- ===================================================================== -->
+  <section
+    id="resident-inspector"
+    class="fixed z-20 left-0 right-0 bottom-0 md:left-5 md:right-auto md:bottom-5 w-full md:w-[432px] md:max-w-[440px] max-h-[62vh] md:max-h-[calc(100vh-136px)] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition"
+  >
+    <!-- Mobile Sheet Grabber Handle (< 768px) -->
+    <button
+      type="button"
+      onclick="toggleMobileSheetHeight()"
+      aria-label="Toggle inspector sheet size"
+      class="md:hidden w-full pt-2.5 pb-1 flex flex-col items-center justify-center cursor-pointer shrink-0"
+    >
+      <span class="w-10 h-1 rounded-full bg-white/20"></span>
+    </button>
+
+    <!-- Scrollable Inspector Body -->
+    <div id="inspector-content" class="px-5 pt-3 md:pt-5 pb-5 overflow-y-auto thin-scroll space-y-4">
+      <!-- Populated dynamically -->
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- 4. CITY REVIEWER SLIDE-OVER GLASS DRAWER (RIGHT 420px)                -->
+  <!-- ===================================================================== -->
+  <aside
+    id="reviewer-drawer"
+    aria-hidden="true"
+    class="fixed z-25 top-[116px] md:top-[76px] bottom-0 md:bottom-5 right-0 md:right-5 w-full md:w-[420px] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition translate-x-full opacity-0 pointer-events-none"
+  >
+    <!-- Drawer Header + Storm Simulator Card -->
+    <div class="p-5 border-b border-white/[0.07] space-y-4 shrink-0">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <h2 class="font-display font-bold text-base sm:text-lg text-white tracking-tight">
+            Alert Approval Console
+          </h2>
+          <p class="text-xs text-slate-400">
+            Verify calibrated AI scores before public broadcast
+          </p>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button
+            id="reanalyze-btn"
+            type="button"
+            onclick="analyzeSelectedZone()"
+            title="Re-evaluate selected zone"
+            class="px-3 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-medium text-slate-200 spring-transition cursor-pointer disabled:opacity-40"
+          >
+            ↻ Re-score
+          </button>
+          <button
+            type="button"
+            onclick="setViewMode('resident')"
+            aria-label="Close reviewer drawer"
+            class="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-slate-300 hover:text-white spring-transition cursor-pointer"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Sleek Storm Simulator (45 mm/hr Cloudburst) Toggle Card -->
+      <div
+        id="cloudburst-card"
+        class="rounded-2xl p-3.5 border border-white/[0.08] bg-slate-950/55 flex items-center justify-between gap-3 spring-transition"
+      >
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-display font-bold text-sm text-white">Storm Simulator</span>
+            <span class="font-mono tabular-nums text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-400/25">
+              45 mm/hr
+            </span>
           </div>
-          <div class="flex items-center gap-2 text-slate-200">
-            <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold text-[11px] flex items-center justify-center shrink-0">2</span>
-            <span><strong class="text-white">Report Water:</strong> Share ankle- or knee-deep water in one tap.</span>
-          </div>
-          <div class="flex items-center gap-2 text-slate-200">
-            <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold text-[11px] flex items-center justify-center shrink-0">3</span>
-            <span><strong class="text-white">Stay Safe:</strong> Get verified alerts and clear next steps.</span>
-          </div>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Inject sustained 3-hour cloudburst for live demo
+          </p>
+        </div>
+
+        <button
+          id="cloudburst-toggle"
+          type="button"
+          role="switch"
+          aria-checked="false"
+          aria-label="Storm Simulator (45 mm/hr Cloudburst)"
+          onclick="toggleCloudburst()"
+          class="relative inline-flex h-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700/90 spring-transition focus:outline-none"
+          style="width: 50px;"
+        >
+          <span
+            id="cloudburst-knob"
+            class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md spring-transition translate-x-0"
+          ></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Scrollable Verification Cards Queue -->
+    <div id="reviewer-queue-list" class="p-5 overflow-y-auto thin-scroll space-y-3.5 flex-1">
+      <!-- Populated dynamically -->
+    </div>
+  </aside>
+
+  <!-- ===================================================================== -->
+  <!-- 5. SLEEK 1-TAP REPORT WATER DRAWER / MODAL                            -->
+  <!-- ===================================================================== -->
+  <div
+    id="report-modal-backdrop"
+    onclick="if(event.target === this) closeReportModal()"
+    class="fixed inset-0 z-40 bg-slate-950/65 backdrop-blur-sm hidden items-end sm:items-center justify-center p-0 sm:p-4 spring-transition"
+  >
+    <div class="w-full sm:max-w-[440px] glass-surface rounded-t-[28px] sm:rounded-[26px] p-5 sm:p-6 space-y-4 border border-white/12">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <span class="text-[11px] font-mono uppercase tracking-wider text-sky-400">Ground Telemetry</span>
+          <h3 class="font-display font-extrabold text-lg text-white mt-0.5">
+            Report Water in <span id="modal-zone-name" class="text-sky-300">—</span>
+          </h3>
         </div>
         <button
           type="button"
-          onclick="toggleGuide(false)"
-          aria-label="Dismiss quick guide"
-          class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
+          onclick="closeReportModal()"
+          aria-label="Close report modal"
+          class="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-    </div>
 
-    <!-- Subtle Connection Notice Banner -->
-    <div id="error-banner" class="hidden bg-rose-950/90 border-t border-rose-500/40 px-4 sm:px-6 py-2 text-xs text-rose-200">
-      <div class="max-w-[1440px] mx-auto flex items-center justify-between gap-3">
-        <span id="error-banner-msg"></span>
-        <button onclick="hideError()" class="text-rose-200 hover:text-white underline text-xs cursor-pointer shrink-0">Dismiss</button>
+      <!-- Tactile 3-Tile Selector -->
+      <div class="grid grid-cols-3 gap-2.5">
+        <button
+          type="button"
+          data-condition="Ankle-Deep"
+          onclick="selectReportCondition('Ankle-Deep')"
+          class="condition-tile rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[104px] cursor-pointer spring-transition"
+        >
+          <div class="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 17h18M5 13h14M8 9h8" />
+            </svg>
+          </div>
+          <div>
+            <div class="font-display font-bold text-xs sm:text-sm text-white">Ankle-Deep</div>
+            <div class="font-mono tabular-nums text-[11px] text-slate-400 mt-0.5">~15 cm curb</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-condition="Knee-Deep"
+          onclick="selectReportCondition('Knee-Deep')"
+          class="condition-tile rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[104px] cursor-pointer spring-transition"
+        >
+          <div class="w-8 h-8 rounded-xl bg-rose-500/15 border border-rose-400/30 flex items-center justify-center text-rose-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
+            </svg>
+          </div>
+          <div>
+            <div class="font-display font-bold text-xs sm:text-sm text-white">Knee-Deep</div>
+            <div class="font-mono tabular-nums text-[11px] text-slate-400 mt-0.5">~45 cm road</div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          data-condition="Blocked Drain"
+          onclick="selectReportCondition('Blocked Drain')"
+          class="condition-tile rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[104px] cursor-pointer spring-transition"
+        >
+          <div class="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-400/30 flex items-center justify-center text-sky-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+          </div>
+          <div>
+            <div class="font-display font-bold text-xs sm:text-sm text-white">Blocked Drain</div>
+            <div class="font-mono tabular-nums text-[11px] text-slate-400 mt-0.5">Grate choked</div>
+          </div>
+        </button>
       </div>
-    </div>
-  </header>
 
-  <!-- Mobile Sticky Segmented Mode Switcher (< 768px only) -->
-  <div class="md:hidden sticky top-0 z-30 bg-slate-950/95 backdrop-blur-md border-b border-slate-800 px-4 py-2.5">
-    <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800">
+      <!-- Quick Note Input -->
+      <div>
+        <input
+          id="report-description"
+          type="text"
+          maxlength="240"
+          placeholder="Add landmark detail (optional, e.g., near South Station approach)..."
+          class="w-full rounded-xl bg-slate-950/85 border border-white/10 focus:border-sky-400 focus:outline-none px-3.5 py-3 text-sm text-white placeholder-slate-500"
+        />
+      </div>
+
+      <!-- Submit Button & Instant Visual Confirmation -->
       <button
-        id="mobile-tab-resident"
+        id="send-report-btn"
         type="button"
-        onclick="switchMobileMode('resident')"
-        class="py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer bg-sky-500 text-slate-950 shadow"
+        onclick="submitResidentReport()"
+        class="w-full py-3.5 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 hover:from-sky-300 hover:to-blue-400 active:scale-[0.99] text-slate-950 font-display font-extrabold text-sm shadow-lg shadow-sky-500/25 spring-transition cursor-pointer disabled:opacity-50"
       >
-        Resident Map
+        Submit Live Street Report
       </button>
-      <button
-        id="mobile-tab-reviewer"
-        type="button"
-        onclick="switchMobileMode('reviewer')"
-        class="py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-300 hover:text-white flex items-center justify-center gap-1.5"
-      >
-        <span>City Reviewer</span>
-        <span id="mobile-pending-pill" class="hidden px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-slate-950">0</span>
-      </button>
+
+      <div id="report-confirmation" class="hidden rounded-xl bg-emerald-500/15 border border-emerald-400/35 px-3.5 py-2.5 text-xs text-emerald-200 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span id="report-confirmation-text">Report verified and scored live.</span>
+      </div>
     </div>
   </div>
 
-  <!-- Main Workspace: 60% Resident View (3/5 cols) + 40% City Reviewer (2/5 cols) on Desktop (>= 768px) -->
-  <main class="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 grid grid-cols-1 md:grid-cols-5 gap-6 items-start">
-
-    <!-- =================================================================== -->
-    <!-- LEFT / PRIMARY TAB: RESIDENT VIEW (60% width on >= 768px)           -->
-    <!-- =================================================================== -->
-    <section id="resident-panel" class="md:col-span-3 flex flex-col gap-4">
-
-      <!-- Neighborhood Pills (4 Thumb-Friendly Kochi Zone Buttons) -->
-      <div>
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Select Your Kochi Neighborhood
-          </h2>
-          <span id="live-updating-indicator" class="hidden text-xs text-sky-300 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5 animate-spin text-sky-400" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-            </svg>
-            <span id="live-updating-text">Checking 6-hour rain forecast...</span>
-          </span>
-        </div>
-
-        <div id="zone-pills" class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        </div>
-      </div>
-
-      <!-- Selected Zone Forecast, Time-to-Flood Warning Banner, 6-Hour Strip & Approved Alert Card -->
-      <div id="actionable-alert-card" class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5 shadow-xl transition-all">
-      </div>
-
-      <!-- Interactive Map Card -->
-      <div class="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 shadow-xl">
-        <div id="kochi-map" class="w-full h-[340px] sm:h-[390px] z-10"></div>
-
-        <!-- Clean Everyday Legend (Green = Safe, Amber = Watch, Red = Flood Risk) -->
-        <div class="absolute bottom-3 left-3 z-20 bg-slate-950/92 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2 text-xs shadow-lg">
-          <div class="flex flex-wrap items-center gap-3.5">
-            <span class="flex items-center gap-1.5 font-medium text-slate-200">
-              <span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> Safe
-            </span>
-            <span class="flex items-center gap-1.5 font-medium text-slate-200">
-              <span class="w-3 h-3 rounded-full bg-amber-400 inline-block"></span> Watch
-            </span>
-            <span class="flex items-center gap-1.5 font-medium text-slate-200">
-              <span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> Flood Risk
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 1-Tap "Report Waterlogging" Card -->
-      <div class="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 sm:p-5 shadow-xl">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <h2 class="text-base font-bold text-white">Report Waterlogging</h2>
-            <p class="text-xs text-slate-400 mt-0.5">
-              Spotted water on the road in <strong id="report-zone-label" class="text-sky-300">—</strong>? Pick what you see below.
-            </p>
-          </div>
-          <span id="report-count-badge" class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-            0 neighbor reports
-          </span>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
-          <button
-            type="button"
-            data-condition="Ankle-Deep"
-            onclick="selectReportCondition('Ankle-Deep')"
-            class="condition-btn flex items-center gap-3 p-3.5 rounded-xl border text-left transition cursor-pointer min-h-[60px]"
-          >
-            <span class="text-xl shrink-0" aria-hidden="true">🦶</span>
-            <div>
-              <div class="text-sm font-semibold text-white">Ankle-Deep</div>
-              <div class="text-xs text-slate-400">Edge of road or footpath</div>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            data-condition="Knee-Deep"
-            onclick="selectReportCondition('Knee-Deep')"
-            class="condition-btn flex items-center gap-3 p-3.5 rounded-xl border text-left transition cursor-pointer min-h-[60px]"
-          >
-            <span class="text-xl shrink-0" aria-hidden="true">🌊</span>
-            <div>
-              <div class="text-sm font-semibold text-white">Knee-Deep</div>
-              <div class="text-xs text-slate-400">Unsafe for bikes &amp; cars</div>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            data-condition="Blocked Drain"
-            onclick="selectReportCondition('Blocked Drain')"
-            class="condition-btn flex items-center gap-3 p-3.5 rounded-xl border text-left transition cursor-pointer min-h-[60px]"
-          >
-            <span class="text-xl shrink-0" aria-hidden="true">🚧</span>
-            <div>
-              <div class="text-sm font-semibold text-white">Blocked Drain</div>
-              <div class="text-xs text-slate-400">Grate clogged or overflowing</div>
-            </div>
-          </button>
-        </div>
-
-        <div class="flex flex-col sm:flex-row gap-2.5">
-          <input
-            id="report-description"
-            type="text"
-            maxlength="240"
-            placeholder="Optional note (e.g., Near South Station underpass entrance)..."
-            class="flex-1 rounded-xl bg-slate-950 border border-slate-800 focus:border-sky-500 focus:outline-none px-3.5 py-3 text-sm text-white placeholder-slate-500"
-          />
-          <button
-            id="send-report-btn"
-            type="button"
-            onclick="submitResidentReport()"
-            class="px-5 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 active:bg-sky-300 text-slate-950 font-bold text-sm shadow-lg shadow-sky-500/20 transition cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send Report
-          </button>
-        </div>
-
-        <div id="report-feedback" class="hidden mt-2.5 text-xs text-emerald-300 font-medium"></div>
-
-        <div id="recent-reports-list" class="mt-3.5 pt-3.5 border-t border-slate-800/80 hidden">
-        </div>
-      </div>
-    </section>
-
-    <!-- =================================================================== -->
-    <!-- RIGHT / SECONDARY TAB: CITY REVIEWER PANEL (40% width on >= 768px)  -->
-    <!-- =================================================================== -->
-    <aside id="reviewer-panel" class="hidden md:flex md:col-span-2 flex-col gap-4">
-
-      <!-- Clean Test Heavy Rain (45mm/hr) Demo Switch -->
-      <div id="cloudburst-card" class="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 sm:p-5 shadow-xl transition-all">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2">
-              <h2 class="text-sm sm:text-base font-bold text-white">Test Heavy Rain (45mm/hr)</h2>
-              <span id="sim-badge" class="hidden text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                3h Storm Active
-              </span>
-            </div>
-            <p class="text-xs text-slate-400 mt-0.5">
-              Simulate heavy rain to test live AI scoring
-            </p>
-          </div>
-
-          <button
-            id="cloudburst-toggle"
-            type="button"
-            role="switch"
-            aria-checked="false"
-            aria-label="Test Heavy Rain (45mm/hr)"
-            onclick="toggleCloudburst()"
-            class="relative inline-flex h-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors duration-200 ease-in-out focus:outline-none"
-            style="width: 52px;"
-          >
-            <span
-              id="cloudburst-knob"
-              class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0"
-            ></span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Alert Approval Queue -->
-      <div class="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 sm:p-5 shadow-xl flex flex-col gap-4">
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <div class="flex items-center gap-2">
-              <h2 class="text-base font-bold text-white">Alert Approval Queue</h2>
-              <span id="pending-count-badge" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                0 Waiting
-              </span>
-            </div>
-            <p class="text-xs text-slate-400 mt-0.5">
-              Verify AI risk scores before sending alerts to residents.
-            </p>
-          </div>
-
-          <button
-            id="reanalyze-btn"
-            type="button"
-            onclick="analyzeSelectedZone()"
-            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 transition cursor-pointer shrink-0 disabled:opacity-50"
-          >
-            ↻ Refresh Score
-          </button>
-        </div>
-
-        <div id="reviewer-queue-list" class="space-y-3.5">
-        </div>
-      </div>
-    </aside>
-
-  </main>
-
   <script>
+    // =========================================================================
+    // Application State
+    // =========================================================================
     const state = {
       zones: {},
       zoneOrder: [],
@@ -396,49 +538,54 @@
       selectedCondition: 'Ankle-Deep',
       simulateCloudburst: false,
       loadingZoneId: null,
-      expandedSignalZones: {},
-      mobileMode: 'resident',
+      aiDisclosureOpen: {},
+      viewMode: 'resident', // 'resident' | 'reviewer'
+      mobileSheetCollapsed: false,
     };
 
     let map = null;
     const polygonLayers = {};
+    const pulseMarkers = {};
 
-    const RISK_UI = {
+    const SHORT_NAMES = {
+      south_railway_underpass: 'South Railway Underpass',
+      panampilly_nagar: 'Panampilly Nagar',
+      mg_road_padma: 'MG Road',
+      edappally_toll: 'Edappally',
+    };
+
+    const STATUS_THEME = {
       LOW: {
-        shortLabel: 'Safe',
-        strokeColor: '#059669',
-        fillColor: '#10b981',
-        pillBadge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35',
-        cardStyle: 'border-emerald-500/35 bg-slate-900/85',
-        bannerBox: 'bg-emerald-950/35 border-emerald-500/35 text-emerald-100',
-        barColor: 'bg-emerald-500',
+        label: 'Safe',
+        hex: '#10B981',
+        dotClass: 'bg-emerald-400 shadow-[0_0_10px_#10B981]',
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30',
+        glowClass: 'glow-safe',
+        alertCard: 'bg-gradient-to-br from-emerald-500/14 via-slate-900/60 to-slate-950/80 border-emerald-400/25',
       },
       WATCH: {
-        shortLabel: 'Watch',
-        strokeColor: '#d97706',
-        fillColor: '#f59e0b',
-        pillBadge: 'bg-amber-500/20 text-amber-200 border-amber-500/40',
-        cardStyle: 'border-amber-500/45 bg-amber-950/20',
-        bannerBox: 'bg-amber-950/45 border-amber-500/45 text-amber-100',
-        barColor: 'bg-amber-400',
+        label: 'Watch',
+        hex: '#F59E0B',
+        dotClass: 'bg-amber-400 shadow-[0_0_12px_#F59E0B]',
+        badgeClass: 'bg-amber-500/18 text-amber-200 border-amber-400/35',
+        glowClass: 'glow-watch',
+        alertCard: 'bg-gradient-to-br from-amber-500/20 via-amber-950/35 to-slate-950/85 border-amber-400/35',
       },
       HIGH: {
-        shortLabel: 'Flood Risk',
-        strokeColor: '#dc2626',
-        fillColor: '#ef4444',
-        pillBadge: 'bg-rose-500/20 text-rose-200 border-rose-500/50',
-        cardStyle: 'border-rose-500/55 bg-rose-950/25',
-        bannerBox: 'bg-rose-950/55 border-rose-500/55 text-rose-100',
-        barColor: 'bg-rose-500',
+        label: 'Flood Risk',
+        hex: '#EF4444',
+        dotClass: 'bg-rose-500 shadow-[0_0_14px_#EF4444]',
+        badgeClass: 'bg-rose-500/20 text-rose-200 border-rose-400/45',
+        glowClass: 'glow-high',
+        alertCard: 'bg-gradient-to-br from-rose-500/24 via-rose-950/40 to-slate-950/85 border-rose-400/45',
       },
       UNASSESSED: {
-        shortLabel: 'Tap to check',
-        strokeColor: '#475569',
-        fillColor: '#64748b',
-        pillBadge: 'bg-slate-800 text-slate-300 border-slate-700',
-        cardStyle: 'border-slate-800 bg-slate-900/80',
-        bannerBox: 'bg-slate-950/70 border-slate-800 text-slate-200',
-        barColor: 'bg-slate-500',
+        label: 'Scanning',
+        hex: '#64748B',
+        dotClass: 'bg-slate-400',
+        badgeClass: 'bg-white/[0.06] text-slate-300 border-white/10',
+        glowClass: '',
+        alertCard: 'bg-slate-950/65 border-white/10',
       },
     };
 
@@ -453,195 +600,246 @@
     }
 
     function formatTime(isoStr) {
-      if (!isoStr) return 'just now';
+      if (!isoStr) return 'Live';
       try {
         return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       } catch {
-        return 'just now';
+        return 'Live';
       }
     }
 
-    function toggleGuide(show) {
-      const strip = document.getElementById('quick-guide-strip');
-      const restoreBtn = document.getElementById('show-guide-btn');
-      if (show) {
-        strip.classList.remove('hidden');
-        restoreBtn.classList.add('hidden');
-        try { sessionStorage.removeItem('rainready_hide_guide'); } catch {}
-      } else {
-        strip.classList.add('hidden');
-        restoreBtn.classList.remove('hidden');
-        try { sessionStorage.setItem('rainready_hide_guide', '1'); } catch {}
-      }
-    }
-
-    function switchMobileMode(mode) {
-      state.mobileMode = mode;
-      const resPanel = document.getElementById('resident-panel');
-      const revPanel = document.getElementById('reviewer-panel');
-      const resBtn = document.getElementById('mobile-tab-resident');
-      const revBtn = document.getElementById('mobile-tab-reviewer');
-
-      if (mode === 'reviewer') {
-        resPanel.classList.add('hidden', 'md:flex');
-        revPanel.classList.remove('hidden');
-        revPanel.classList.add('flex');
-        revBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer bg-sky-500 text-slate-950 shadow flex items-center justify-center gap-1.5';
-        resBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-300 hover:text-white';
-      } else {
-        resPanel.classList.remove('hidden');
-        revPanel.classList.add('hidden');
-        revPanel.classList.remove('flex');
-        resBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer bg-sky-500 text-slate-950 shadow';
-        revBtn.className = 'py-2 px-3 rounded-lg text-xs font-semibold transition cursor-pointer text-slate-300 hover:text-white flex items-center justify-center gap-1.5';
-        if (map) {
-          setTimeout(() => map.invalidateSize(), 60);
-        }
-      }
-    }
-
-    function selectReportCondition(condition) {
-      state.selectedCondition = condition;
-      renderConditionButtons();
-    }
-
-    function renderConditionButtons() {
-      document.querySelectorAll('.condition-btn').forEach(btn => {
-        const cond = btn.getAttribute('data-condition');
-        const active = cond === state.selectedCondition;
-        btn.className = active
-          ? 'condition-btn flex items-center gap-3 p-3.5 rounded-xl border-2 border-sky-400 bg-sky-500/15 text-left transition cursor-pointer min-h-[60px] shadow-md shadow-sky-950/40'
-          : 'condition-btn flex items-center gap-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 hover:border-slate-700 text-left transition cursor-pointer min-h-[60px]';
-      });
-    }
-
-    function showError(msg) {
-      const banner = document.getElementById('error-banner');
-      document.getElementById('error-banner-msg').textContent = msg;
+    let toastTimer = null;
+    function showToast(msg, isError = false) {
+      const banner = document.getElementById('toast-banner');
+      const dot = document.getElementById('toast-dot');
+      const txt = document.getElementById('toast-msg');
+      txt.textContent = msg;
+      dot.className = isError
+        ? 'w-2 h-2 rounded-full bg-rose-400 shrink-0 animate-pulse'
+        : 'w-2 h-2 rounded-full bg-sky-400 shrink-0 animate-pulse';
       banner.classList.remove('hidden');
-    }
-
-    function hideError() {
-      document.getElementById('error-banner').classList.add('hidden');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => banner.classList.add('hidden'), isError ? 6000 : 3200);
     }
 
     function setLoading(zoneId, label) {
       state.loadingZoneId = zoneId;
-      const indicator = document.getElementById('live-updating-indicator');
-      const textEl = document.getElementById('live-updating-text');
+      const telLabel = document.getElementById('telemetry-label');
       const sendBtn = document.getElementById('send-report-btn');
-      const reanalyzeBtn = document.getElementById('reanalyze-btn');
+      const reBtn = document.getElementById('reanalyze-btn');
 
       if (zoneId) {
-        textEl.textContent = label || 'Checking 6-hour rain forecast...';
-        indicator.classList.remove('hidden');
-        sendBtn.disabled = true;
-        reanalyzeBtn.disabled = true;
+        if (telLabel) telLabel.textContent = label || 'Syncing Kochi Forecast...';
+        if (sendBtn) sendBtn.disabled = true;
+        if (reBtn) reBtn.disabled = true;
       } else {
-        indicator.classList.add('hidden');
-        sendBtn.disabled = false;
-        reanalyzeBtn.disabled = false;
+        if (telLabel) telLabel.textContent = 'Live Kochi Telemetry';
+        if (sendBtn) sendBtn.disabled = false;
+        if (reBtn) reBtn.disabled = false;
+      }
+      renderZoneStrip();
+    }
+
+    // =========================================================================
+    // Spatial Mode & Sheet Controls
+    // =========================================================================
+    function setViewMode(mode) {
+      state.viewMode = mode;
+      const resBtn = document.getElementById('mode-resident-btn');
+      const revBtn = document.getElementById('mode-reviewer-btn');
+      const drawer = document.getElementById('reviewer-drawer');
+      const inspector = document.getElementById('resident-inspector');
+
+      if (mode === 'reviewer') {
+        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white';
+        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm flex items-center gap-1.5';
+
+        drawer.classList.remove('translate-x-full', 'opacity-0', 'pointer-events-none');
+        drawer.classList.add('translate-x-0', 'opacity-100', 'pointer-events-auto');
+        drawer.setAttribute('aria-hidden', 'false');
+
+        // On mobile (<768px), hide bottom sheet while City Reviewer drawer is open
+        inspector.classList.add('hidden', 'md:flex');
+      } else {
+        resBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer bg-white text-slate-950 shadow-sm';
+        revBtn.className = 'px-3 sm:px-4 py-1.5 rounded-full text-xs font-display font-bold tracking-tight spring-transition cursor-pointer text-slate-300 hover:text-white flex items-center gap-1.5';
+
+        drawer.classList.add('translate-x-full', 'opacity-0', 'pointer-events-none');
+        drawer.classList.remove('translate-x-0', 'opacity-100', 'pointer-events-auto');
+        drawer.setAttribute('aria-hidden', 'true');
+
+        inspector.classList.remove('hidden');
+      }
+
+      if (map) {
+        setTimeout(() => map.invalidateSize(), 120);
       }
     }
 
+    function toggleMobileSheetHeight() {
+      state.mobileSheetCollapsed = !state.mobileSheetCollapsed;
+      const inspector = document.getElementById('resident-inspector');
+      if (state.mobileSheetCollapsed) {
+        inspector.style.maxHeight = '168px';
+      } else {
+        inspector.style.maxHeight = '';
+      }
+    }
+
+    function openReportModal() {
+      const zone = state.zones[state.selectedZoneId];
+      if (!zone) return;
+      document.getElementById('modal-zone-name').textContent = zone.name;
+      document.getElementById('report-confirmation').classList.add('hidden');
+      renderConditionTiles();
+      const backdrop = document.getElementById('report-modal-backdrop');
+      backdrop.classList.remove('hidden');
+      backdrop.classList.add('flex');
+    }
+
+    function closeReportModal() {
+      const backdrop = document.getElementById('report-modal-backdrop');
+      backdrop.classList.add('hidden');
+      backdrop.classList.remove('flex');
+    }
+
+    function selectReportCondition(cond) {
+      state.selectedCondition = cond;
+      renderConditionTiles();
+    }
+
+    function renderConditionTiles() {
+      document.querySelectorAll('.condition-tile').forEach(tile => {
+        const cond = tile.getAttribute('data-condition');
+        const active = cond === state.selectedCondition;
+        tile.className = active
+          ? 'condition-tile rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[104px] cursor-pointer spring-transition bg-sky-500/16 border-2 border-sky-400 shadow-[0_0_24px_rgba(56,189,248,0.2)]'
+          : 'condition-tile rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[104px] cursor-pointer spring-transition bg-slate-950/65 border border-white/10 hover:border-white/20';
+      });
+    }
+
+    // =========================================================================
+    // Full-Bleed Dark Street Map, Glowing Polygons & Pulsing Beacons
+    // =========================================================================
     function initMap() {
       map = L.map('kochi-map', {
-        center: [9.985, 76.295],
+        center: [9.978, 76.292],
         zoom: 13,
-        zoomControl: true,
+        zoomControl: false,
       });
 
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // Clean high-detail street tiles styled into Obsidian Dark-Matter via CSS filter (0 watermarks)
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
+        attribution: '&copy; OpenStreetMap',
         subdomains: ['a', 'b', 'c'],
         maxZoom: 19,
       }).addTo(map);
     }
 
-    function getPolygonStyle(zone, isSelected) {
-      const evalObj = zone.latest_evaluation || zone.approved_alert;
-      const riskKey = evalObj ? evalObj.risk_level : 'UNASSESSED';
-      const ui = RISK_UI[riskKey] || RISK_UI.UNASSESSED;
-      const isApproved = Boolean(zone.approved);
-
-      return {
-        color: isSelected ? '#0284c7' : ui.strokeColor,
-        weight: isSelected ? 3.5 : 2.5,
-        opacity: 0.95,
-        dashArray: isApproved ? null : '6, 5',
-        fillColor: ui.fillColor,
-        fillOpacity: evalObj ? (isSelected ? 0.42 : 0.30) : 0.18,
-      };
+    function flyToZoneCamera(zone) {
+      if (!map || !zone) return;
+      const isDesktop = window.innerWidth >= 768;
+      // Offset longitude slightly west on desktop so the polygon centers cleanly to the right of the left inspector
+      const targetLat = isDesktop ? zone.lat : zone.lat - 0.0045;
+      const targetLng = isDesktop ? zone.lng - 0.0075 : zone.lng;
+      map.flyTo([targetLat, targetLng], isDesktop ? 14 : 13.5, {
+        duration: 0.85,
+        easeLinearity: 0.25,
+      });
     }
 
-    function syncMapPolygons(fitInitialBounds = false) {
-      const groupBounds = [];
-
+    function syncMapLayers(fitInitial = false) {
       for (const zoneId of state.zoneOrder) {
         const zone = state.zones[zoneId];
         const isSelected = zoneId === state.selectedZoneId;
-        const style = getPolygonStyle(zone, isSelected);
+        const activeEval = zone.approved_alert || zone.latest_evaluation;
+        const riskKey = activeEval ? activeEval.risk_level : 'UNASSESSED';
+        const theme = STATUS_THEME[riskKey] || STATUS_THEME.UNASSESSED;
+
+        const polyStyle = {
+          color: isSelected ? '#38BDF8' : theme.hex,
+          weight: isSelected ? 3 : 2,
+          opacity: 0.95,
+          dashArray: zone.approved ? null : '6, 5',
+          fillColor: theme.hex,
+          fillOpacity: activeEval ? (isSelected ? 0.36 : 0.22) : 0.12,
+        };
 
         if (!polygonLayers[zoneId]) {
-          const geoLayer = L.geoJSON(zone.polygon, {
-            style: () => style,
-            onEachFeature: (_, layer) => {
-              layer.on('click', () => selectZone(zoneId, true));
+          const layer = L.geoJSON(zone.polygon, {
+            style: () => polyStyle,
+            onEachFeature: (_, lyr) => {
+              lyr.on('click', () => selectZone(zoneId, true));
             },
           }).addTo(map);
-          polygonLayers[zoneId] = geoLayer;
+          polygonLayers[zoneId] = layer;
         } else {
-          polygonLayers[zoneId].setStyle(style);
+          polygonLayers[zoneId].setStyle(polyStyle);
         }
 
-        const evalObj = zone.latest_evaluation;
-        const ui = RISK_UI[evalObj ? evalObj.risk_level : 'UNASSESSED'] || RISK_UI.UNASSESSED;
-        const statusLine = evalObj
-          ? `${ui.shortLabel} (${evalObj.confidence_score}% AI confidence)`
-          : 'Tap to check 6-hour rain & flood risk';
-
+        const mmRate = zone.weather ? `${Number(zone.weather.current_rate_mm_hr || 0).toFixed(1)} mm/hr` : 'Tap to scan';
         polygonLayers[zoneId].bindTooltip(
-          `<div class="text-xs font-sans"><strong>${escapeHtml(zone.name)}</strong><br/>${escapeHtml(statusLine)}</div>`,
+          `<div class="text-xs"><strong class="font-semibold">${escapeHtml(zone.name)}</strong> · <span class="font-mono">${escapeHtml(mmRate)}</span></div>`,
           { sticky: true, direction: 'top' }
         );
 
-        groupBounds.push(polygonLayers[zoneId].getBounds());
+        // Pulsing Radar Marker for WATCH / HIGH or Selected Zone
+        if (pulseMarkers[zoneId]) {
+          map.removeLayer(pulseMarkers[zoneId]);
+          delete pulseMarkers[zoneId];
+        }
+
+        if (riskKey === 'HIGH' || riskKey === 'WATCH' || isSelected) {
+          const pulseColor = riskKey === 'HIGH' ? '#EF4444' : riskKey === 'WATCH' ? '#F59E0B' : '#10B981';
+          const showRing = riskKey === 'HIGH' || riskKey === 'WATCH';
+          const icon = L.divIcon({
+            className: 'bg-transparent border-0',
+            iconSize: [36, 36],
+            iconAnchor: [18, 18],
+            html: `
+              <div class="relative w-9 h-9 flex items-center justify-center pointer-events-none">
+                ${
+                  showRing
+                    ? `<span class="pulse-ring absolute inset-1 rounded-full" style="background:${pulseColor};"></span>`
+                    : ''
+                }
+                <span class="relative w-3.5 h-3.5 rounded-full border-2 border-white shadow-lg" style="background:${pulseColor};"></span>
+              </div>
+            `,
+          });
+          pulseMarkers[zoneId] = L.marker([zone.lat, zone.lng], { icon, interactive: false }).addTo(map);
+        }
       }
 
-      if (fitInitialBounds && groupBounds.length > 0) {
-        let combined = groupBounds[0];
-        for (let i = 1; i < groupBounds.length; i++) {
-          combined = combined.extend(groupBounds[i]);
-        }
-        map.fitBounds(combined.pad(0.14));
+      if (fitInitial && state.selectedZoneId && state.zones[state.selectedZoneId]) {
+        flyToZoneCamera(state.zones[state.selectedZoneId]);
       }
     }
 
     // =========================================================================
-    // Live Backend API Calls
+    // Backend API Integration
     // =========================================================================
     async function checkEngineHealth() {
       try {
         const res = await fetch('/api/health');
         const data = await res.json();
-        const dot = document.getElementById('status-dot');
+        const dot = document.getElementById('telemetry-dot');
         if (data.gemini_key_configured) {
-          dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow shadow-emerald-400/50 inline-block';
-          dot.title = `Live service online (${data.weather_provider})`;
+          dot.className = 'w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse';
         } else {
-          dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse inline-block';
-          dot.title = 'Live AI key not configured yet';
+          dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
         }
       } catch {
-        const dot = document.getElementById('status-dot');
-        dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-400 inline-block';
-        dot.title = 'Reconnecting to server...';
+        const dot = document.getElementById('telemetry-dot');
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-400';
       }
     }
 
-    async function loadZones(fitMap = false) {
+    async function loadZones(flyInitial = false) {
       const res = await fetch('/api/zones');
-      if (!res.ok) throw new Error('Unable to load neighborhood data right now.');
+      if (!res.ok) throw new Error('Unable to sync Kochi zones');
       const data = await res.json();
 
       state.zoneOrder = data.zones.map(z => z.id);
@@ -653,23 +851,23 @@
         state.selectedZoneId = state.zoneOrder[0];
       }
 
-      syncMapPolygons(fitMap);
+      syncMapLayers(flyInitial);
       renderAll();
     }
 
-    async function selectZone(zoneId, triggerAnalyzeIfNeeded = true) {
+    async function selectZone(zoneId, triggerAnalyze = true) {
       const changed = state.selectedZoneId !== zoneId;
       state.selectedZoneId = zoneId;
       const zone = state.zones[zoneId];
 
-      if (zone && polygonLayers[zoneId] && changed && map) {
-        map.flyToBounds(polygonLayers[zoneId].getBounds().pad(0.45), { duration: 0.55 });
+      if (changed && zone) {
+        flyToZoneCamera(zone);
       }
 
-      syncMapPolygons(false);
+      syncMapLayers(false);
       renderAll();
 
-      if (triggerAnalyzeIfNeeded && zone && !state.loadingZoneId) {
+      if (triggerAnalyze && zone && !state.loadingZoneId) {
         const lastWasSim = Boolean(zone.weather && zone.weather.is_simulated);
         if (!zone.latest_evaluation || lastWasSim !== state.simulateCloudburst) {
           await analyzeZone(zoneId);
@@ -686,12 +884,11 @@
       const zone = state.zones[zoneId];
       if (!zone) return;
 
-      hideError();
       setLoading(
         zoneId,
         state.simulateCloudburst
-          ? `Simulating 3-hour 45mm/hr storm in ${zone.name}...`
-          : `Checking 6-hour rain forecast for ${zone.name}...`
+          ? `Simulating 45mm/hr Cloudburst · ${SHORT_NAMES[zoneId] || zone.name}`
+          : `Scanning 6h Forecast · ${SHORT_NAMES[zoneId] || zone.name}`
       );
 
       try {
@@ -704,13 +901,13 @@
         });
         const payload = await res.json();
         if (!res.ok) {
-          throw new Error(payload.detail || 'Could not refresh street flood forecast right now.');
+          throw new Error(payload.detail || 'Live forecast analysis failed.');
         }
 
         await checkEngineHealth();
         await loadZones(false);
       } catch (err) {
-        showError(err.message || 'Could not refresh street flood forecast right now.');
+        showToast(err.message || 'Unable to complete live forecast scan.', true);
       } finally {
         setLoading(null);
       }
@@ -723,12 +920,11 @@
       const condition = state.selectedCondition || 'Ankle-Deep';
       const descInput = document.getElementById('report-description');
       const customNote = descInput.value.trim();
-      const zoneName = state.zones[zoneId]?.name || 'your area';
-      const feedbackEl = document.getElementById('report-feedback');
+      const confBox = document.getElementById('report-confirmation');
+      const confTxt = document.getElementById('report-confirmation-text');
 
-      hideError();
-      feedbackEl.classList.add('hidden');
-      setLoading(zoneId, `Sending your "${condition}" report for ${zoneName}...`);
+      confBox.classList.add('hidden');
+      setLoading(zoneId, `Scoring "${condition}" report...`);
 
       try {
         const res = await fetch('/api/report', {
@@ -743,15 +939,19 @@
         });
         const payload = await res.json();
         if (!res.ok) {
-          throw new Error(payload.detail || 'Could not send your report right now.');
+          throw new Error(payload.detail || 'Could not submit street report.');
         }
 
         descInput.value = '';
-        feedbackEl.textContent = `✓ Thank you — your "${condition}" report updated the live flood forecast for ${zoneName}.`;
-        feedbackEl.classList.remove('hidden');
+        confTxt.textContent = `${condition} logged — AI confidence updated to ${payload.confidence_score}%.`;
+        confBox.classList.remove('hidden');
         await loadZones(false);
+
+        setTimeout(() => {
+          closeReportModal();
+        }, 1100);
       } catch (err) {
-        showError(err.message || 'Could not send your report right now.');
+        showToast(err.message || 'Could not submit street report.', true);
       } finally {
         setLoading(null);
       }
@@ -759,7 +959,6 @@
 
     async function approveZoneAlert(zoneId) {
       if (state.loadingZoneId) return;
-      hideError();
 
       try {
         const res = await fetch(`/api/approve/${encodeURIComponent(zoneId)}`, {
@@ -767,13 +966,13 @@
         });
         const payload = await res.json();
         if (!res.ok) {
-          throw new Error(payload.detail || 'Could not publish alert.');
+          throw new Error(payload.detail || 'Approval failed.');
         }
         state.selectedZoneId = zoneId;
-        state.expandedSignalZones[zoneId] = true;
         await loadZones(false);
+        showToast(`Broadcast live for ${state.zones[zoneId]?.name || zoneId}`);
       } catch (err) {
-        showError(err.message || 'Could not publish alert.');
+        showToast(err.message || 'Approval failed.', true);
       }
     }
 
@@ -787,412 +986,419 @@
       }
     }
 
-    function toggleSignalDrawer(zoneId) {
-      state.expandedSignalZones[zoneId] = !state.expandedSignalZones[zoneId];
-      renderActionableAlertCard();
+    function toggleAiDisclosure(zoneId) {
+      state.aiDisclosureOpen[zoneId] = !state.aiDisclosureOpen[zoneId];
+      renderResidentInspector();
     }
 
     document.getElementById('reset-demo-btn').addEventListener('click', async () => {
       if (state.loadingZoneId) return;
-      hideError();
-      document.getElementById('report-feedback').classList.add('hidden');
       state.simulateCloudburst = false;
-      state.expandedSignalZones = {};
+      state.aiDisclosureOpen = {};
       renderCloudburstToggle();
       await fetch('/api/reset', { method: 'POST' });
       await loadZones(true);
+      if (state.selectedZoneId) {
+        await analyzeZone(state.selectedZoneId);
+      }
     });
 
     // =========================================================================
-    // 6-Hour Rainfall Intensity Strip & Duration Warning Banner Helpers
-    // =========================================================================
-    function renderDurationAndSixHourStrip(zone, evalData, weatherData) {
-      if (!evalData && !weatherData) return '';
-
-      const meta = zone.metadata || {};
-      const threshold = Number(meta.drainage_threshold_mm_per_hr || 30);
-      const satHours = Number(meta.saturation_hours || 2.0);
-      const riskKey = evalData ? evalData.risk_level : 'LOW';
-      const ui = RISK_UI[riskKey] || RISK_UI.LOW;
-      const isAtRisk = riskKey === 'HIGH' || riskKey === 'WATCH' || (evalData && evalData.hours_until_flood_risk !== null && evalData.hours_until_flood_risk !== undefined);
-
-      const headline = evalData?.duration_alert_headline || `Checking 6-hour rain window for ${zone.name}...`;
-      const expectedRainPill = evalData?.expected_rainfall_summary
-        || (weatherData ? `${Number(weatherData.expected_6h_total_mm || 0).toFixed(1)} mm over next 6h` : '—');
-
-      const contHrs = evalData?.continuous_rain_hours ?? weatherData?.continuous_rain_hours ?? 0;
-      const hrsToFlood = evalData?.hours_until_flood_risk;
-      const continuousWindowText = hrsToFlood !== null && hrsToFlood !== undefined
-        ? `${Number(contHrs).toFixed(1)}h sustained · Floods in ~${Number(hrsToFlood).toFixed(1)}h`
-        : `${Number(contHrs).toFixed(1)}h sustained (Limit: ${threshold} mm/hr for ${satHours}h)`;
-
-      // Merge hourly_breakdown with clock labels from weatherData.hourly_forecast
-      const rawForecast = weatherData?.hourly_forecast || [];
-      const breakdown = (evalData?.hourly_breakdown && evalData.hourly_breakdown.length === 6)
-        ? evalData.hourly_breakdown.map((item, i) => ({
-            hour_label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
-            clock_label: rawForecast[i]?.clock_label || '',
-            mm_per_hr: Number(item.mm_per_hr || 0),
-            exceeds_drain_capacity: Boolean(item.exceeds_drain_capacity),
-          }))
-        : rawForecast.slice(0, 6).map((item, i) => ({
-            hour_label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
-            clock_label: item.clock_label || '',
-            mm_per_hr: Number(item.mm_per_hr || 0),
-            exceeds_drain_capacity: Boolean(item.mm_per_hr >= threshold),
-          }));
-
-      const maxScale = Math.max(threshold * 1.35, ...breakdown.map(b => b.mm_per_hr), 10);
-
-      return `
-        <!-- Time-to-Flood Warning Banner + Stat Pills -->
-        <div id="time-to-flood-banner" class="mt-3 rounded-xl border p-3.5 ${ui.bannerBox}">
-          <div class="flex items-start gap-2.5">
-            <span class="text-base shrink-0 mt-0.5" aria-hidden="true">${isAtRisk ? '⚠️' : '✅'}</span>
-            <div class="flex-1 min-w-0">
-              <div class="text-sm sm:text-base font-bold text-white leading-snug">
-                ${escapeHtml(headline)}
-              </div>
-              <div class="mt-2.5 flex flex-wrap gap-2">
-                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/75 border border-slate-800 text-xs">
-                  <span class="text-slate-400">Expected Rain (Next 6h):</span>
-                  <strong class="text-white">${escapeHtml(expectedRainPill)}</strong>
-                </div>
-                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/75 border border-slate-800 text-xs">
-                  <span class="text-slate-400">Continuous Rain Window:</span>
-                  <strong class="${isAtRisk ? 'text-amber-300' : 'text-emerald-300'}">${escapeHtml(continuousWindowText)}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 6-Hour Rainfall Intensity Strip -->
-        ${
-          breakdown.length > 0
-            ? `
-          <div id="six-hour-rain-strip" class="mt-3 rounded-xl bg-slate-950/80 border border-slate-800 p-3.5">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
-              <span class="text-xs font-semibold text-slate-200">
-                6-Hour Rainfall Intensity Forecast
-              </span>
-              <span class="text-[11px] text-slate-400">
-                Street drain limit: <strong class="text-amber-300">${threshold} mm/hr</strong> (${satHours}h saturation)
-              </span>
-            </div>
-
-            <div class="grid grid-cols-6 gap-2 items-end pt-1">
-              ${breakdown
-                .map(bar => {
-                  const pctHeight = bar.mm_per_hr <= 0
-                    ? 6
-                    : Math.max(12, Math.min(100, Math.round((bar.mm_per_hr / maxScale) * 100)));
-                  const overLimit = bar.exceeds_drain_capacity;
-                  const severeOver = bar.mm_per_hr >= threshold * 1.25;
-                  const barBg = overLimit
-                    ? (severeOver
-                        ? 'bg-gradient-to-t from-rose-600 to-rose-400 shadow-sm shadow-rose-500/30'
-                        : 'bg-gradient-to-t from-amber-500 to-amber-300 shadow-sm shadow-amber-500/30')
-                    : (bar.mm_per_hr > 2.0 ? 'bg-sky-400' : 'bg-emerald-500/75');
-                  const textTone = overLimit
-                    ? (severeOver ? 'text-rose-300 font-bold' : 'text-amber-300 font-bold')
-                    : 'text-slate-300 font-medium';
-
-                  return `
-                    <div class="flex flex-col items-center">
-                      <span class="text-[11px] ${textTone} mb-1">
-                        ${bar.mm_per_hr.toFixed(bar.mm_per_hr >= 10 ? 0 : 1)}<span class="text-[9px] font-normal opacity-80">mm</span>
-                      </span>
-                      <div class="w-full h-16 rounded-lg bg-slate-900/90 border ${
-                        overLimit ? 'border-rose-500/45' : 'border-slate-800/90'
-                      } flex items-end p-1">
-                        <div class="w-full rounded ${barBg} transition-all duration-500" style="height: ${pctHeight}%"></div>
-                      </div>
-                      <span class="text-[11px] font-semibold text-slate-200 mt-1.5">${escapeHtml(bar.hour_label)}</span>
-                      ${
-                        bar.clock_label
-                          ? `<span class="text-[10px] text-slate-500 leading-none mt-0.5">${escapeHtml(bar.clock_label)}</span>`
-                          : ''
-                      }
-                    </div>
-                  `;
-                })
-                .join('')}
-            </div>
-          </div>
-        `
-            : ''
-        }
-      `;
-    }
-
-    // =========================================================================
-    // UI Renderers
+    // Renderers: Floating Strip, Inspector, 6h Timeline & Reviewer Drawer
     // =========================================================================
     function renderCloudburstToggle() {
       const btn = document.getElementById('cloudburst-toggle');
       const knob = document.getElementById('cloudburst-knob');
-      const badge = document.getElementById('sim-badge');
       const card = document.getElementById('cloudburst-card');
 
       btn.setAttribute('aria-checked', String(state.simulateCloudburst));
       if (state.simulateCloudburst) {
-        btn.classList.remove('bg-slate-700');
+        btn.classList.remove('bg-slate-700/90');
         btn.classList.add('bg-rose-500');
         knob.classList.remove('translate-x-0');
-        knob.classList.add('translate-x-6');
-        badge.classList.remove('hidden');
-        card.className = 'rounded-2xl border border-rose-500/50 bg-rose-950/25 p-4 sm:p-5 shadow-xl transition-all';
+        knob.classList.add('translate-x-[22px]');
+        card.className = 'rounded-2xl p-3.5 border border-rose-500/45 bg-rose-950/35 flex items-center justify-between gap-3 spring-transition shadow-[0_0_24px_rgba(239,68,68,0.18)]';
       } else {
-        btn.classList.add('bg-slate-700');
+        btn.classList.add('bg-slate-700/90');
         btn.classList.remove('bg-rose-500');
         knob.classList.add('translate-x-0');
-        knob.classList.remove('translate-x-6');
-        badge.classList.add('hidden');
-        card.className = 'rounded-2xl border border-slate-800 bg-slate-900/85 p-4 sm:p-5 shadow-xl transition-all';
+        knob.classList.remove('translate-x-[22px]');
+        card.className = 'rounded-2xl p-3.5 border border-white/[0.08] bg-slate-950/55 flex items-center justify-between gap-3 spring-transition';
       }
     }
 
-    function renderNeighborhoodPills() {
-      const container = document.getElementById('zone-pills');
-      container.innerHTML = state.zoneOrder
+    function renderZoneStrip() {
+      const strip = document.getElementById('zone-strip');
+      strip.innerHTML = state.zoneOrder
         .map(zid => {
           const z = state.zones[zid];
           const isSelected = zid === state.selectedZoneId;
+          const isLoading = zid === state.loadingZoneId;
           const activeEval = z.approved_alert || z.latest_evaluation;
           const riskKey = activeEval ? activeEval.risk_level : 'UNASSESSED';
-          const ui = RISK_UI[riskKey] || RISK_UI.UNASSESSED;
+          const theme = STATUS_THEME[riskKey] || STATUS_THEME.UNASSESSED;
+          const rateTxt = z.weather
+            ? `${Number(z.weather.current_rate_mm_hr || 0).toFixed(1)} mm/h`
+            : '— mm/h';
+          const shortName = SHORT_NAMES[zid] || z.name;
 
           return `
             <button
               type="button"
               onclick="selectZone('${zid}', true)"
-              class="min-h-[64px] flex flex-col justify-between p-3 rounded-xl border text-left transition cursor-pointer ${
+              class="glass-pill rounded-full px-3.5 py-2 flex items-center gap-2.5 shrink-0 cursor-pointer ${
                 isSelected
-                  ? 'bg-sky-950/45 border-sky-400 shadow-md shadow-sky-950/40'
-                  : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                  ? 'border-sky-400/70 bg-slate-900/92 shadow-[0_0_20px_rgba(56,189,248,0.22)]'
+                  : ''
               }"
             >
-              <span class="text-xs sm:text-sm font-semibold text-white leading-snug line-clamp-1">
-                ${escapeHtml(z.name)}
+              <span class="w-2 h-2 rounded-full shrink-0 ${
+                isLoading ? 'bg-sky-400 animate-ping' : theme.dotClass
+              }"></span>
+              <span class="font-display font-semibold text-xs sm:text-[13px] text-white whitespace-nowrap">
+                ${escapeHtml(shortName)}
               </span>
-              <div class="mt-2 flex items-center justify-between gap-1.5">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${ui.pillBadge}">
-                  ${escapeHtml(ui.shortLabel)}
-                </span>
-                ${
-                  z.approved
-                    ? `<span class="text-[11px] text-emerald-300 font-medium">Verified</span>`
-                    : z.review_status === 'PENDING_REVIEW'
-                    ? `<span class="text-[11px] text-amber-300/90 font-medium">In review</span>`
-                    : ''
-                }
-              </div>
+              <span class="font-mono tabular-nums text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] text-slate-300">
+                ${escapeHtml(rateTxt)}
+              </span>
             </button>
           `;
         })
         .join('');
     }
 
-    function renderActionableAlertCard() {
-      const container = document.getElementById('actionable-alert-card');
-      const selectedZone = state.zones[state.selectedZoneId];
-      if (!selectedZone) return;
+    function getActionIconSvg(idx) {
+      if (idx === 0) {
+        return `<svg class="w-4 h-4 text-sky-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>`;
+      }
+      if (idx === 1) {
+        return `<svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-8 5h8m-9 5h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>`;
+      }
+      return `<svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>`;
+    }
 
-      const approvedAlert = selectedZone.approved_alert;
-      const latestEval = selectedZone.latest_evaluation;
+    function buildConfidenceRingSvg(pct, hexColor, size = 46) {
+      const r = (size - 7) / 2;
+      const c = 2 * Math.PI * r;
+      const clamped = Math.max(0, Math.min(100, Number(pct || 0)));
+      const offset = c - (clamped / 100) * c;
+      return `
+        <div class="relative flex items-center justify-center shrink-0" style="width:${size}px;height:${size}px;">
+          <svg class="-rotate-90" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+            <circle cx="${size / 2}" cy="${size / 2}" r="${r}" stroke="rgba(255,255,255,0.09)" stroke-width="4" fill="none" />
+            <circle
+              cx="${size / 2}" cy="${size / 2}" r="${r}"
+              stroke="${hexColor}" stroke-width="4" stroke-linecap="round" fill="none"
+              stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
+            />
+          </svg>
+          <span class="absolute font-mono tabular-nums text-[11px] font-bold text-white">${clamped}%</span>
+        </div>
+      `;
+    }
 
-      // If neither approved nor evaluated yet, show initial loading/prompt card
-      if (!approvedAlert && !latestEval) {
-        container.className = 'rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5 shadow-xl';
-        container.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-              <svg class="w-5 h-5 text-sky-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-              </svg>
+    function renderSixHourTimeline(zone, evalData, weatherData) {
+      const meta = zone.metadata || {};
+      const threshold = Number(meta.drainage_threshold_mm_per_hr || 30);
+      const rawForecast = weatherData?.hourly_forecast || [];
+
+      const bars = (evalData?.hourly_breakdown && evalData.hourly_breakdown.length === 6)
+        ? evalData.hourly_breakdown.map((item, i) => ({
+            label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
+            clock: rawForecast[i]?.clock_label || '',
+            mm: Number(item.mm_per_hr || 0),
+            over: Boolean(item.exceeds_drain_capacity),
+          }))
+        : rawForecast.slice(0, 6).map((item, i) => ({
+            label: item.hour_label || ['Now', '+1h', '+2h', '+3h', '+4h', '+5h'][i],
+            clock: item.clock_label || '',
+            mm: Number(item.mm_per_hr || 0),
+            over: Boolean(item.mm_per_hr >= threshold),
+          }));
+
+      if (bars.length === 0) return '';
+
+      const maxScale = Math.max(threshold * 1.35, ...bars.map(b => b.mm), 12);
+      const thresholdBottomPct = Math.min(92, Math.max(12, Math.round((threshold / maxScale) * 100)));
+
+      return `
+        <div id="six-hour-timeline" class="rounded-2xl bg-slate-950/60 border border-white/[0.07] p-4">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <span class="text-[11px] font-display font-bold uppercase tracking-wider text-slate-400">
+              6-Hour Rain Timeline
+            </span>
+            <span class="font-mono tabular-nums text-[11px] text-amber-300/90 flex items-center gap-1.5">
+              <span class="w-3 border-t border-dashed border-amber-400 inline-block"></span>
+              Overflow ${threshold} mm/hr
+            </span>
+          </div>
+
+          <div class="relative pt-4">
+            <!-- Chart Plot Area with Dashed Drainage Overflow Threshold Line -->
+            <div class="relative h-20 grid grid-cols-6 gap-2.5 items-end">
+              <div
+                class="pointer-events-none absolute inset-x-0 border-t border-dashed border-amber-400/65 z-10"
+                style="bottom: ${thresholdBottomPct}%;"
+              ></div>
+
+              ${bars
+                .map(b => {
+                  const hPct = b.mm <= 0 ? 6 : Math.max(10, Math.min(100, Math.round((b.mm / maxScale) * 100)));
+                  const barStyle = b.over
+                    ? 'bg-gradient-to-t from-rose-600 via-rose-500 to-amber-300 shadow-[0_0_16px_rgba(239,68,68,0.4)]'
+                    : b.mm > 2
+                    ? 'bg-gradient-to-t from-sky-600 to-sky-400'
+                    : 'bg-emerald-500/70';
+                  const numColor = b.over ? 'text-rose-300 font-bold' : 'text-slate-300';
+
+                  return `
+                    <div class="relative h-full flex flex-col justify-end items-center">
+                      <span class="font-mono tabular-nums text-[10px] ${numColor} mb-1 z-20">
+                        ${b.mm.toFixed(b.mm >= 10 ? 0 : 1)}
+                      </span>
+                      <div class="w-full flex-1 flex items-end">
+                        <div class="w-full rounded-t-md ${barStyle} spring-transition" style="height:${hPct}%;"></div>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join('')}
             </div>
+
+            <!-- X-Axis Labels -->
+            <div class="grid grid-cols-6 gap-2.5 mt-2 pt-2 border-t border-white/[0.06] text-center">
+              ${bars
+                .map(
+                  b => `
+                <div class="flex flex-col">
+                  <span class="font-mono tabular-nums text-[11px] font-semibold text-slate-200">${escapeHtml(b.label)}</span>
+                  <span class="text-[9px] text-slate-500 mt-0.5">${escapeHtml(b.clock)}</span>
+                </div>
+              `
+                )
+                .join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderResidentInspector() {
+      const inspectorShell = document.getElementById('resident-inspector');
+      const content = document.getElementById('inspector-content');
+      const zone = state.zones[state.selectedZoneId];
+      if (!zone) return;
+
+      const approvedAlert = zone.approved_alert;
+      const latestEval = zone.latest_evaluation;
+      const displayEval = approvedAlert || latestEval;
+      const displayWeather = approvedAlert ? approvedAlert.weather : zone.weather;
+      const dec = (approvedAlert ? approvedAlert.decisions_telemetry : zone.decisions_telemetry) || {};
+
+      const riskKey = displayEval ? displayEval.risk_level : 'UNASSESSED';
+      const theme = STATUS_THEME[riskKey] || STATUS_THEME.UNASSESSED;
+
+      inspectorShell.className = `fixed z-20 left-0 right-0 bottom-0 md:left-5 md:right-auto md:bottom-5 w-full md:w-[432px] md:max-w-[440px] max-h-[62vh] md:max-h-[calc(100vh-136px)] glass-surface rounded-t-[28px] md:rounded-[26px] flex flex-col overflow-hidden spring-transition ${
+        state.viewMode === 'reviewer' ? 'hidden md:flex' : 'flex'
+      } ${theme.glowClass}`;
+
+      if (!displayEval) {
+        content.innerHTML = `
+          <div class="py-8 flex flex-col items-center text-center gap-3">
+            <div class="w-10 h-10 rounded-full border-2 border-sky-400/40 border-t-sky-400 animate-spin"></div>
             <div>
-              <h3 class="text-sm sm:text-base font-bold text-white">${escapeHtml(selectedZone.name)}</h3>
-              <p class="text-xs sm:text-sm text-slate-300 mt-0.5">
-                Fetching live 6-hour rain forecast and drainage threshold analysis...
-              </p>
+              <h2 class="font-display font-bold text-lg text-white">${escapeHtml(zone.name)}</h2>
+              <p class="text-xs text-slate-400 mt-1">Scanning 6-hour Kochi rainfall &amp; street drainage capacity...</p>
             </div>
           </div>
         `;
         return;
       }
 
-      // Display approved alert when verified, otherwise show live forecast + pending status for the selected zone
-      const displayEval = approvedAlert || latestEval;
-      const displayWeather = approvedAlert ? approvedAlert.weather : selectedZone.weather;
-      const ui = RISK_UI[displayEval.risk_level] || RISK_UI.LOW;
-      const isOpen = Boolean(state.expandedSignalZones[selectedZone.id]);
+      const headline = displayEval.duration_alert_headline || `Live conditions in ${zone.name}`;
+      const expectedRain = displayEval.expected_rainfall_summary
+        || (displayWeather ? `${Number(displayWeather.expected_6h_total_mm || 0).toFixed(1)} mm in 6h` : '0.0 mm');
+      const contHrs = Number(displayEval.continuous_rain_hours ?? displayWeather?.continuous_rain_hours ?? 0).toFixed(1);
+      const floodCountdown = displayEval.hours_until_flood_risk !== null && displayEval.hours_until_flood_risk !== undefined
+        ? `${Number(displayEval.hours_until_flood_risk).toFixed(1)}h to overflow`
+        : `${zone.metadata.saturation_hours}h drain buffer`;
 
-      container.className = `rounded-2xl border p-4 sm:p-5 shadow-xl ${ui.cardStyle}`;
-      container.innerHTML = `
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="px-2.5 py-1 rounded-full text-xs font-bold border ${ui.pillBadge}">
-              ${escapeHtml(ui.shortLabel)}
-            </span>
-            <h3 class="text-base sm:text-lg font-bold text-white">${escapeHtml(selectedZone.name)}</h3>
-            ${
-              approvedAlert
-                ? `<span class="text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full">
-                    ✓ Verified Alert · ${formatTime(approvedAlert.approved_at)}
-                  </span>`
-                : `<span class="text-xs font-medium text-amber-200 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-full">
-                    Live Forecast · Awaiting City Verification
-                  </span>`
-            }
+      const aiOpen = Boolean(state.aiDisclosureOpen[zone.id]);
+      const actionsToRender = approvedAlert ? approvedAlert.resident_actions || [] : displayEval.resident_actions || [];
+
+      content.innerHTML = `
+        <!-- Hero Risk Header -->
+        <div class="space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-display font-bold uppercase tracking-wider border ${theme.badgeClass}">
+                  ${escapeHtml(theme.label)}
+                </span>
+                ${
+                  approvedAlert
+                    ? `<span class="text-[11px] font-medium text-emerald-300 flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                        Verified Broadcast
+                      </span>`
+                    : `<button type="button" onclick="setViewMode('reviewer')" class="text-[11px] font-medium text-amber-300 hover:text-amber-200 underline decoration-amber-400/40 cursor-pointer">
+                        Pending Reviewer Approval →
+                      </button>`
+                }
+              </div>
+              <h1 class="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-white leading-tight">
+                ${escapeHtml(zone.name)}
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5 truncate">${escapeHtml(zone.subtitle)}</p>
+            </div>
+
+            ${buildConfidenceRingSvg(displayEval.confidence_score, theme.hex, 48)}
           </div>
-          <span class="text-xs text-slate-300">
-            AI Confidence: <strong class="text-white">${displayEval.confidence_score}%</strong>
-          </span>
+
+          <!-- Apple Weather–Style Severe / Time-to-Flood Alert Card -->
+          <div id="time-to-flood-card" class="rounded-2xl border p-4 ${theme.alertCard}">
+            <div class="flex items-start gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p class="font-display font-bold text-sm sm:text-[15px] text-white leading-snug">
+                ${escapeHtml(headline)}
+              </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-white/[0.08]">
+              <div>
+                <span class="block text-[10px] uppercase tracking-wider text-slate-400">Expected Rain</span>
+                <span class="font-mono tabular-nums text-xs font-bold text-white">${escapeHtml(expectedRain)}</span>
+              </div>
+              <div>
+                <span class="block text-[10px] uppercase tracking-wider text-slate-400">Sustained Window</span>
+                <span class="font-mono tabular-nums text-xs font-bold text-sky-300">${escapeHtml(contHrs)}h · ${escapeHtml(floodCountdown)}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        ${renderDurationAndSixHourStrip(selectedZone, displayEval, displayWeather)}
+        <!-- Visual 6-Hour Rain Timeline -->
+        ${renderSixHourTimeline(zone, displayEval, displayWeather)}
 
-        ${
-          approvedAlert
-            ? `
-          <!-- Prominent Plain-English Next Steps (Published once Approved) -->
-          <div class="mt-3 rounded-xl bg-slate-950/75 border border-slate-800/90 p-3.5 sm:p-4">
-            <div class="text-xs font-semibold uppercase tracking-wider text-sky-300 mb-2">
-              What You Should Do Next
-            </div>
-            <ul class="space-y-2">
-              ${(approvedAlert.resident_actions || [])
-                .map(
-                  step => `
-                <li class="flex items-start gap-2.5 text-sm text-white leading-snug">
-                  <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">✓</span>
-                  <span>${escapeHtml(step)}</span>
-                </li>
-              `
-                )
-                .join('')}
-            </ul>
+        <!-- Actionable Next Steps Checklist Cards -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-display font-bold uppercase tracking-wider text-slate-400">
+              ${approvedAlert ? 'Verified Next Steps' : 'Recommended Guidance (Preview)'}
+            </span>
+            <span class="font-mono tabular-nums text-[11px] text-slate-500">
+              Elev ${zone.metadata.elevation_m}m
+            </span>
           </div>
-        `
-            : `
-          <p class="mt-3 text-xs text-slate-300 bg-slate-950/60 border border-slate-800/80 rounded-xl px-3.5 py-2.5">
-            Official resident safety steps appear here as soon as a city reviewer clicks <strong>Approve &amp; Send Alert</strong>.
-          </p>
-        `
-        }
 
-        <!-- Clean "Why am I seeing this?" Expandable Toggle -->
-        <div class="mt-3 pt-3 border-t border-slate-800/80">
+          <div class="space-y-2">
+            ${actionsToRender
+              .map(
+                (action, idx) => `
+              <div class="rounded-2xl bg-white/[0.035] hover:bg-white/[0.055] border border-white/[0.07] p-3 flex items-start gap-3 spring-transition">
+                <div class="w-7 h-7 rounded-xl bg-slate-900/90 border border-white/10 flex items-center justify-center shrink-0 mt-0.5">
+                  ${getActionIconSvg(idx)}
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-100 leading-relaxed">${escapeHtml(action)}</p>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+        </div>
+
+        <!-- Collapsible "How AI calculated this" Disclosure -->
+        <div class="rounded-2xl bg-slate-950/50 border border-white/[0.07] overflow-hidden">
           <button
             type="button"
-            onclick="toggleSignalDrawer('${selectedZone.id}')"
-            class="flex items-center justify-between w-full text-left text-xs sm:text-sm font-medium text-sky-300 hover:text-sky-200 cursor-pointer"
+            onclick="toggleAiDisclosure('${zone.id}')"
+            class="w-full px-4 py-3 flex items-center justify-between text-left text-xs font-display font-bold text-slate-200 hover:text-white cursor-pointer"
           >
-            <span>Why am I seeing this?</span>
-            <span class="text-xs text-slate-300">${isOpen ? '▲ Hide details' : '▼ See rainfall, street & neighbor signals'}</span>
+            <span class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+              How AI calculated this
+            </span>
+            <span class="font-mono text-[11px] text-slate-400">${aiOpen ? '−' : '+'}</span>
           </button>
 
           ${
-            isOpen
+            aiOpen
               ? `
-            <div class="mt-3 rounded-xl bg-slate-950/85 border border-slate-800 p-3.5 space-y-3">
-              <div class="grid grid-cols-3 gap-2 text-xs">
-                <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
-                  <span class="text-slate-400 block text-[11px]">Current Rain Rate</span>
-                  <strong class="text-white">${
-                    displayWeather ? Number(displayWeather.current_rate_mm_hr || 0).toFixed(1) + ' mm/hr' : '—'
-                  }</strong>
+            <div class="px-4 pb-4 pt-1 space-y-3 border-t border-white/[0.06]">
+              <!-- gemini-decision-1 Confidence Gauge Strip -->
+              <div class="grid grid-cols-3 gap-2 pt-2">
+                <div class="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5">
+                  <span class="block text-[10px] text-slate-400">Decision 1 Conf</span>
+                  <span class="font-mono tabular-nums text-xs font-bold text-emerald-300">${displayEval.confidence_score}%</span>
                 </div>
-                <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
-                  <span class="text-slate-400 block text-[11px]">Street Elevation</span>
-                  <strong class="text-white">${selectedZone.metadata.elevation_m}m (${selectedZone.reports.length} report${
-                  selectedZone.reports.length === 1 ? '' : 's'
-                })</strong>
+                <div class="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5">
+                  <span class="block text-[10px] text-slate-400">Alert Prob</span>
+                  <span class="font-mono tabular-nums text-xs font-bold text-white">${
+                    dec.escalate_alert_prob !== undefined ? Math.round(dec.escalate_alert_prob * 100) + '%' : '—'
+                  }</span>
                 </div>
-                <div class="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
-                  <span class="text-slate-400 block text-[11px]">AI Confidence</span>
-                  <strong class="text-emerald-300">${displayEval.confidence_score}% calibrated</strong>
+                <div class="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5">
+                  <span class="block text-[10px] text-slate-400">Severity</span>
+                  <span class="font-mono tabular-nums text-xs font-bold text-white">${
+                    dec.severity_score !== undefined ? Number(dec.severity_score).toFixed(2) : '—'
+                  }/2.0</span>
                 </div>
               </div>
 
-              <ul class="space-y-1.5 text-xs sm:text-sm text-slate-200">
+              <!-- gemini-4-neon Signal Pills -->
+              <div class="space-y-1.5">
                 ${(displayEval.visible_signals || [])
                   .map(
                     sig => `
-                  <li class="flex items-start gap-2">
-                    <span class="text-sky-400 mt-0.5">•</span>
-                    <span>${escapeHtml(sig)}</span>
-                  </li>
+                  <div class="text-xs text-slate-300 bg-white/[0.03] border border-white/[0.06] rounded-xl px-3 py-2 leading-relaxed">
+                    ${escapeHtml(sig)}
+                  </div>
                 `
                   )
                   .join('')}
-              </ul>
+              </div>
             </div>
           `
               : ''
           }
         </div>
+
+        <!-- Prominent "Report Water Here" Action Button -->
+        <button
+          id="open-report-modal-btn"
+          type="button"
+          onclick="openReportModal()"
+          class="w-full py-3.5 px-4 rounded-2xl bg-white hover:bg-slate-100 active:scale-[0.99] text-slate-950 font-display font-extrabold text-sm shadow-xl flex items-center justify-between spring-transition cursor-pointer"
+        >
+          <span class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Report Water Here
+          </span>
+          <span class="font-mono tabular-nums text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-900/10 text-slate-800">
+            ${zone.reports.length} report${zone.reports.length === 1 ? '' : 's'}
+          </span>
+        </button>
       `;
     }
 
-    function renderResidentReportingSection() {
-      const zone = state.zones[state.selectedZoneId];
-      if (!zone) return;
-
-      document.getElementById('report-zone-label').textContent = zone.name;
-      document.getElementById('report-count-badge').textContent = `${zone.reports.length} neighbor report${
-        zone.reports.length === 1 ? '' : 's'
-      }`;
-      renderConditionButtons();
-
-      const listEl = document.getElementById('recent-reports-list');
-      if (zone.reports.length === 0) {
-        listEl.classList.add('hidden');
-        listEl.innerHTML = '';
-        return;
-      }
-
-      listEl.classList.remove('hidden');
-      const recent = [...zone.reports].slice(-3).reverse();
-      listEl.innerHTML = `
-        <div class="text-xs font-semibold text-slate-400 mb-2">
-          Recent Reports in ${escapeHtml(zone.name)}
-        </div>
-        <div class="space-y-1.5">
-          ${recent
-            .map(
-              r => `
-            <div class="flex items-center justify-between gap-2 text-xs bg-slate-950/75 border border-slate-800 rounded-lg px-3 py-2">
-              <div class="truncate">
-                <strong class="text-sky-300">${escapeHtml(r.depth)}</strong>
-                <span class="text-slate-500 mx-1">·</span>
-                <span class="text-slate-200">${escapeHtml(r.description)}</span>
-              </div>
-              <span class="text-[11px] text-slate-400 shrink-0">${formatTime(r.timestamp)}</span>
-            </div>
-          `
-            )
-            .join('')}
-        </div>
-      `;
-    }
-
-    function renderReviewerQueue() {
+    function renderReviewerDrawer() {
       const listEl = document.getElementById('reviewer-queue-list');
-      const badgeEl = document.getElementById('pending-count-badge');
-      const mobilePill = document.getElementById('mobile-pending-pill');
+      const badgeEl = document.getElementById('pending-badge');
 
       const allZones = state.zoneOrder.map(zid => state.zones[zid]);
       const pendingCount = allZones.filter(z => z.review_status === 'PENDING_REVIEW').length;
-      badgeEl.textContent = `${pendingCount} Waiting`;
 
       if (pendingCount > 0) {
-        mobilePill.textContent = String(pendingCount);
-        mobilePill.classList.remove('hidden');
+        badgeEl.textContent = String(pendingCount);
+        badgeEl.classList.remove('hidden');
       } else {
-        mobilePill.classList.add('hidden');
+        badgeEl.classList.add('hidden');
       }
 
       const evaluatedZones = allZones
@@ -1207,9 +1413,9 @@
 
       if (evaluatedZones.length === 0) {
         listEl.innerHTML = `
-          <div class="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center">
-            <p class="text-xs sm:text-sm text-slate-400">
-              Select a neighborhood on the map to generate a live 6-hour AI flood score for review.
+          <div class="rounded-2xl border border-dashed border-white/10 p-8 text-center">
+            <p class="text-xs text-slate-400">
+              Tap a Kochi neighborhood pill above to generate a live AI assessment for review.
             </p>
           </div>
         `;
@@ -1219,78 +1425,45 @@
       listEl.innerHTML = evaluatedZones
         .map(zone => {
           const ev = zone.latest_evaluation;
-          const ui = RISK_UI[ev.risk_level] || RISK_UI.LOW;
+          const theme = STATUS_THEME[ev.risk_level] || STATUS_THEME.LOW;
           const isPending = zone.review_status === 'PENDING_REVIEW';
           const isSelected = zone.id === state.selectedZoneId;
-          const nextRainSummary = ev.expected_rainfall_summary
-            || (zone.weather ? `${Number(zone.weather.expected_6h_total_mm || 0).toFixed(1)} mm in next 6h` : '0.0 mm');
 
           return `
-            <div class="rounded-xl border ${
-              isSelected ? 'border-sky-500/50 bg-slate-950/95' : 'border-slate-800 bg-slate-950/65'
-            } p-4 transition space-y-3">
-              <div class="flex items-start justify-between gap-2">
-                <div>
-                  <button
-                    type="button"
-                    onclick="selectZone('${zone.id}', false)"
-                    class="text-sm sm:text-base font-bold text-white hover:text-sky-300 transition cursor-pointer text-left"
-                  >
-                    ${escapeHtml(zone.name)}
-                  </button>
-                  <div class="text-xs text-slate-400 mt-0.5">
-                    ${escapeHtml(nextRainSummary)} · ${zone.reports.length} neighbor report${
+            <div class="rounded-2xl border ${
+              isSelected ? 'border-sky-400/45 bg-slate-950/75' : 'border-white/[0.08] bg-slate-950/50'
+            } p-4 space-y-3.5 spring-transition">
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onclick="selectZone('${zone.id}', false)"
+                      class="font-display font-bold text-sm sm:text-base text-white hover:text-sky-300 truncate cursor-pointer text-left"
+                    >
+                      ${escapeHtml(zone.name)}
+                    </button>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-display font-bold uppercase border shrink-0 ${theme.badgeClass}">
+                      ${escapeHtml(theme.label)}
+                    </span>
+                  </div>
+                  <p class="font-mono tabular-nums text-[11px] text-slate-400 mt-0.5">
+                    ${escapeHtml(ev.expected_rainfall_summary || '6h live scan')} · ${zone.reports.length} report${
             zone.reports.length === 1 ? '' : 's'
           }
-                  </div>
+                  </p>
                 </div>
 
-                <span class="px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 ${ui.pillBadge}">
-                  ${escapeHtml(ui.shortLabel)}
-                </span>
+                ${buildConfidenceRingSvg(ev.confidence_score, theme.hex, 44)}
               </div>
 
-              ${
-                ev.duration_alert_headline
-                  ? `<div class="text-xs font-semibold px-3 py-2 rounded-lg border ${ui.bannerBox}">
-                      ${escapeHtml(ev.duration_alert_headline)}
-                    </div>`
-                  : ''
-              }
-
-              <!-- AI Confidence % -->
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-slate-300 font-medium">AI Confidence</span>
-                  <span class="font-bold text-white">${ev.confidence_score}%</span>
-                </div>
-                <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div class="h-full ${ui.barColor} transition-all duration-500" style="width: ${Math.min(
-            100,
-            Math.max(0, ev.confidence_score)
-          )}%"></div>
-                </div>
-              </div>
-
-              <!-- Plain-English Summary -->
-              <p class="text-xs sm:text-sm text-slate-200 leading-relaxed bg-slate-900/90 border border-slate-800/90 rounded-xl p-3">
+              <p class="text-xs sm:text-[13px] text-slate-200 leading-relaxed bg-white/[0.03] border border-white/[0.06] rounded-xl p-3">
                 ${escapeHtml(ev.responder_summary)}
               </p>
 
-              <details class="group text-xs text-slate-300">
-                <summary class="cursor-pointer text-sky-300 hover:text-sky-200 font-medium select-none">
-                  View ${(ev.visible_signals || []).length} supporting signals
-                </summary>
-                <ul class="mt-2 space-y-1 pl-4 list-disc text-slate-300">
-                  ${(ev.visible_signals || [])
-                    .map(sig => `<li>${escapeHtml(sig)}</li>`)
-                    .join('')}
-                </ul>
-              </details>
-
-              <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-3">
-                <span class="text-xs text-slate-400">
-                  Updated ${formatTime(zone.evaluated_at)}
+              <div class="flex items-center justify-between gap-3 pt-1">
+                <span class="font-mono tabular-nums text-[11px] text-slate-500">
+                  ${formatTime(zone.evaluated_at)}
                 </span>
 
                 ${
@@ -1299,14 +1472,14 @@
                   <button
                     type="button"
                     onclick="approveZoneAlert('${zone.id}')"
-                    class="px-4 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 active:bg-emerald-200 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition cursor-pointer"
+                    class="px-4 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 hover:-translate-y-0.5 active:scale-[0.98] text-slate-950 font-display font-extrabold text-xs shadow-lg shadow-emerald-500/25 spring-transition cursor-pointer"
                   >
-                    Approve &amp; Send Alert
+                    Approve &amp; Broadcast
                   </button>
                 `
                     : `
-                  <span class="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-semibold text-xs">
-                    ✓ Alert Sent to Residents
+                  <span class="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 font-display font-bold text-xs">
+                    ✓ Broadcast Live
                   </span>
                 `
                 }
@@ -1319,19 +1492,15 @@
 
     function renderAll() {
       renderCloudburstToggle();
-      renderNeighborhoodPills();
-      renderActionableAlertCard();
-      renderResidentReportingSection();
-      renderReviewerQueue();
+      renderZoneStrip();
+      renderResidentInspector();
+      renderReviewerDrawer();
     }
 
+    // =========================================================================
+    // Boot
+    // =========================================================================
     (async function boot() {
-      try {
-        if (sessionStorage.getItem('rainready_hide_guide') === '1') {
-          toggleGuide(false);
-        }
-      } catch {}
-
       initMap();
       await checkEngineHealth();
       await loadZones(true);
